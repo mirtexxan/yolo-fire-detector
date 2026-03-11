@@ -26,7 +26,7 @@ Usage:
 Controls:
     - Press 'q' or 'ESC' to quit
     - Press 's' to save current frame with detections
-    - For image testing: Use arrow keys to navigate
+    - For image testing: Use arrow keys (or 'a'/'d') to navigate between images
 """
 
 from ultralytics import YOLO
@@ -36,10 +36,16 @@ import argparse
 import os
 from pathlib import Path
 from datetime import datetime
+import threading
+import time
 
 
 class FireDetector:
     """Fire detection system using YOLOv8"""
+    
+    # Variabili globali per la cattura dei tasti
+    _last_key = None
+    _key_listener = None
     
     def __init__(
         self,
@@ -73,6 +79,47 @@ class FireDetector:
         print(f"✓ Modello caricato con successo")
         print(f"  Soglia di confidenza: {conf_threshold}")
         print(f"  Device: {'GPU' if device != 'cpu' else 'CPU'}")
+    
+    @staticmethod
+    def _on_key_press(key):
+        """Callback per la pressione dei tasti (con pynput)."""
+        try:
+            FireDetector._last_key = key.char
+        except AttributeError:
+            # Tasto speciale (freccia, etc)
+            key_name = str(key).split('.')[-1]
+            if 'left' in key_name:
+                FireDetector._last_key = 'left'
+            elif 'right' in key_name:
+                FireDetector._last_key = 'right'
+    
+    @staticmethod
+    def _start_key_listener():
+        """Avvia il listener dei tasti usando pynput (se disponibile)."""
+        try:
+            from pynput import keyboard
+            listener = keyboard.Listener(on_press=FireDetector._on_key_press)
+            listener.start()
+            FireDetector._key_listener = listener
+            return True
+        except ImportError:
+            return False
+    
+    @staticmethod
+    def _get_key_robust(timeout_ms=0):
+        """
+        Legge un tasto in modo robusto.
+        Prima tenta con pynput (System-wide), poi fallback a OpenCV.
+        """
+        # Se abbiamo un tasto in sospeso da pynput, ritornalo
+        if FireDetector._last_key is not None:
+            key = FireDetector._last_key
+            FireDetector._last_key = None
+            return key
+        
+        # Altrimenti usa OpenCV
+        key = cv2.waitKey(timeout_ms if timeout_ms > 0 else 0)
+        return key
     
     def detect_frame(self, frame: np.ndarray) -> tuple:
         """
@@ -443,10 +490,18 @@ class FireDetector:
         print(f"Cartella: {images_folder}")
         print(f"Immagini trovate: {len(image_paths)}")
         print("Controlli:")
-        print("  ← → : Naviga tra le immagini")
+        print("  ← → (frecce) o 'a'/'d': Naviga tra le immagini")
         print("  's' : Salva immagine corrente")
         print("  'q' o ESC: Esci")
         print("="*60 + "\n")
+        
+        # Inizia il listener dei tasti (se disponibile)
+        use_pynput = self._start_key_listener()
+        if use_pynput:
+            print("✅ Usando pynput per la cattura dei tasti (system-wide)")
+        else:
+            print("ℹ️  Usando OpenCV per la cattura dei tasti (window-focused)")
+        print()
         
         current_idx = 0
         
@@ -489,19 +544,47 @@ class FireDetector:
             # Mostra immagine
             cv2.imshow("Fire Detection - Test Images", annotated_img)
             
-            # Gestisci input
-            key = cv2.waitKey(0) & 0xFF
+            # Gestisci input in modo robusto
+            navigate = True
+            while navigate:
+                key = self._get_key_robust()
+                
+                # Converti key a stringa se è un numero
+                if isinstance(key, int):
+                    key_char = chr(key & 0xFF) if key >= 0 else None
+                else:
+                    key_char = str(key).lower() if key else None
+                
+                # Gestione dei tasti
+                if key == 27 or key_char == 'q':  # ESC o q
+                    navigate = False
+                    break
+                elif key_char == 's':  # Salva
+                    self.save_frame(annotated_img, detections)
+                    navigate = False
+                elif key_char in ['a', 'left'] or key in [81, 65361]:  # Sinistra
+                    current_idx = (current_idx - 1) % len(image_paths)
+                    navigate = False
+                elif key_char in ['d', 'right'] or key in [83, 65363]:  # Destra
+                    current_idx = (current_idx + 1) % len(image_paths)
+                    navigate = False
+                elif key_char and key_char not in ['\x00', '']:
+                    # Tasto riconosciuto ma non valido, mostra aiuto ma continua
+                    continue
+                else:
+                    # Timeout, continua
+                    continue
             
-            if key in [ord('q'), 27]:  # 'q' o ESC
+            # Ferma il listener se eravamo fuori dal loop
+            if key == 27 or key_char == 'q':
                 break
-            elif key == ord('s'):  # Salva
-                self.save_frame(annotated_img, detections)
-            elif key == 81:  # Freccia sinistra (←)
-                current_idx = (current_idx - 1) % len(image_paths)
-            elif key == 83:  # Freccia destra (→)
-                current_idx = (current_idx + 1) % len(image_paths)
         
         cv2.destroyAllWindows()
+        
+        # Ferma il listener dei tasti
+        if self._key_listener is not None:
+            self._key_listener.stop()
+        
         print("\n✓ Test su immagini completato")
 
 

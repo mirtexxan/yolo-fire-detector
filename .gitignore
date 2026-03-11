@@ -1,10 +1,11 @@
 # I file di dataset non devono essere tracciati da git.
 dataset/*
 
-# Cartelle di training e risultati YOLO
+# Cartelle di training, risultati YOLO, test di detection
 fire_detector_runs/
 runs/
 wandb/
+detections/
 
 # Python bytecode
 __pycache__/

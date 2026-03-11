@@ -5,6 +5,9 @@ Sistema completo per il rilevamento di incendi utilizzando YOLOv8 e dataset sint
 ## 🚀 Quick Start
 
 ```bash
+# Installa le dipendenze
+pip install -r requirements.txt
+
 # 1. Genera il dataset sintetico
 python generator.py
 
@@ -47,9 +50,15 @@ python detect.py --source video.mp4  # Video file
 - `s`: Salva frame corrente
 
 ### Modalità Test Immagini:
-- `← →`: Naviga tra le immagini
+- `← →` (frecce) o `a`/`d`: Naviga tra le immagini
 - `s`: Salva immagine corrente
-- `q` o `ESC`: Esci
+- `q` o ESC: Esci
+
+**Nota:** Per migliore supporto dei tasti, installa `pynput`:
+```bash
+pip install pynput
+```
+Con pynput, le arrow keys funzionano da qualsiasi applicazione (anche se la finestra non è in focus).
 
 ## ⚙️ Configurazione
 

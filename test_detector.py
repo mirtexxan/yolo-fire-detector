@@ -51,7 +51,7 @@ def main():
     print("\n🚀 Comando per testare il detector:")
     print(f"python detect.py --source {val_images_path}")
     print("\n📋 Controlli durante il test:")
-    print("  ← → : Naviga tra le immagini")
+    print("  ← → (frecce) o 'a'/'d': Naviga tra le immagini")
     print("  's' : Salva immagine con detections")
     print("  'q' : Esci")
 
