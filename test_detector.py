@@ -16,11 +16,24 @@ def main():
     print("🔥 Fire Detector - Test Script")
     print("=" * 40)
 
-    # Verifica che il modello esista
-    model_path = "fire_detector_runs/train/weights/best.pt"
-    if not os.path.exists(model_path):
-        print(f"❌ Modello non trovato: {model_path}")
-        print("Esegui prima il training: python train.py")
+    # Verifica che il modello esista (YOLOv8 lo crea in runs/detect/)
+    model_paths = [
+        "runs/detect/fire_detector_runs/train/weights/best.pt",
+        "fire_detector_runs/train/weights/best.pt",
+    ]
+    
+    model_path = None
+    for path in model_paths:
+        if os.path.exists(path):
+            model_path = path
+            print(f"✅ Modello trovato: {path}")
+            break
+    
+    if model_path is None:
+        print(f"❌ Modello non trovato in nessuna di queste locazioni:")
+        for p in model_paths:
+            print(f"   - {p}")
+        print("\nEsegui prima il training: python train.py")
         return
 
     # Verifica che ci siano immagini di validation

@@ -62,10 +62,10 @@ Tutte le impostazioni sono centralizzate in `settings.py`:
 
 ## 📊 Risultati
 
-I risultati del training vengono salvati in `fire_detector_runs/train/`:
+I risultati del training vengono salvati in `runs/detect/fire_detector_runs/train/`:
 - Modelli: `weights/best.pt`, `weights/last.pt`
 - Log di training e metriche
-- Grafici di loss e mAP
+- Il modello migliore viene automaticamente rilevato e usato da `detect.py`
 
 ## 🔧 Troubleshooting
 

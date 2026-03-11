@@ -130,11 +130,11 @@ def train_model(
     print("\n" + "="*60)
     print("Training completato!")
     print("="*60)
-    print(f"Modello salvato in: fire_detector_runs/train/weights/best.pt")
-    print(f"Risultati disponibili in: fire_detector_runs/train/")
+    print(f"Modello salvato in: runs/detect/fire_detector_runs/train/weights/best.pt")
+    print(f"Risultati disponibili in: runs/detect/fire_detector_runs/train/")
 
 
-def validate_model(model_path: str = "fire_detector_runs/train/weights/best.pt") -> None:
+def validate_model(model_path: str = "runs/detect/fire_detector_runs/train/weights/best.pt") -> None:
     """
     Valida il modello addestrato.
     

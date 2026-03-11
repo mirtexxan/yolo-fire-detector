@@ -43,7 +43,7 @@ class FireDetector:
     
     def __init__(
         self,
-        model_path: str = "fire_detector_runs/train/weights/best.pt",
+        model_path: str = "runs/detect/fire_detector_runs/train/weights/best.pt",
         conf_threshold: float = 0.5,
         device: str = "cpu",
     ):
@@ -530,8 +530,8 @@ Examples:
     parser.add_argument(
         "--weights",
         type=str,
-        default="fire_detector_runs/train/weights/best.pt",
-        help="Percorso del modello YOLOv8"
+        default="runs/detect/fire_detector_runs/train/weights/best.pt",
+        help="Percorso del modello YOLOv8 (creato da train.py)"
     )
     parser.add_argument(
         "--conf",
