@@ -59,6 +59,7 @@ def train_model(
     batch_size: int = TrainingSettings.BATCH_SIZE,
     image_size: int = TrainingSettings.IMAGE_SIZE,
     device: str = TrainingSettings.DEVICE,
+    resume: bool = False,
 ) -> None:
     """
     Addestra il modello YOLO sulla detection del fuoco.
@@ -100,6 +101,20 @@ def train_model(
     print("Inizio training...")
     print("="*60)
     
+    # Controlla se esiste un ultimo checkpoint per resume
+    resume_flag = False
+    ckpt_path = os.path.join(
+        TrainingSettings.PROJECT_NAME,
+        TrainingSettings.EXPERIMENT_NAME,
+        "weights",
+        "last.pt",
+    )
+    if resume and os.path.exists(ckpt_path):
+        resume_flag = True
+        print(f"🔁 Checkpoint trovato ({ckpt_path}), il training continuerà da qui")
+    elif resume and not os.path.exists(ckpt_path):
+        print("⚠️ Resume richiesto ma nessun checkpoint troviato, si parte da zero.")
+
     results = model.train(
         data=yaml_path,
         epochs=epochs,
@@ -111,6 +126,7 @@ def train_model(
         name=TrainingSettings.EXPERIMENT_NAME,
         exist_ok=TrainingSettings.OVERWRITE_EXISTING,
         verbose=TrainingSettings.VERBOSE,
+        resume=resume_flag,
         # Hyperparameters
         lr0=TrainingSettings.LEARNING_RATE_INIT,
         lrf=TrainingSettings.LEARNING_RATE_FINAL,
@@ -202,6 +218,11 @@ if __name__ == "__main__":
         help=f"Device per training: 'cpu' o numero GPU (default: {TrainingSettings.DEVICE})"
     )
     parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Se fornito, riprende il training dall'ultimo checkpoint (last.pt)"
+    )
+    parser.add_argument(
         "--val-only",
         action="store_true",
         help="Solo validazione, non fare training"
@@ -218,4 +239,5 @@ if __name__ == "__main__":
             batch_size=args.batch,
             image_size=args.imgsz,
             device=args.device,
+            resume=args.resume,
         )
