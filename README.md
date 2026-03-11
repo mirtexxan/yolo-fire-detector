@@ -14,13 +14,10 @@ python generator.py
 # 2. Addestra il modello YOLO
 python train.py
 
-# 3. Testa il modello sulle immagini di validation
-python detect.py --source dataset/images/val/
-
-# 4. Usa il detector in tempo reale
-python detect.py  # Webcam
-python detect.py --source rtmp://stream.url  # RTMP stream
-python detect.py --source video.mp4  # Video file
+# 3. Usa il detector
+python run-detector.py            # Menu interattivo
+python run-webcam.py              # Webcam (scorciatoia)
+python run-images.py              # Validation images (scorciatoia)
 ```
 
 ## 📋 Funzionalità
@@ -75,6 +72,35 @@ I risultati del training vengono salvati in `runs/detect/fire_detector_runs/trai
 - Modelli: `weights/best.pt`, `weights/last.pt`
 - Log di training e metriche
 - Il modello migliore viene automaticamente rilevato e usato da `detect.py`
+
+## 🎯 Script di Scelta Rapida
+
+Tutti gli script di utilità con naming convention `run-*.py`:
+
+### `run-detector.py` ⭐ **PRINCIPALE**
+Menu interattivo per scegliere la sorgente:
+```bash
+python run-detector.py
+```
+Opzioni:
+1. Webcam
+2. Validation images
+3. File video
+4. RTMP/RTSP stream
+5. Cartella immagini personalizzata
+
+### `run-webcam.py` 🎥
+Scorciatoia veloce per webcam:
+```bash
+python run-webcam.py
+```
+
+### `run-images.py` 📋
+Scorciatoia per testare su immagini:
+```bash
+python run-images.py                      # Validation images (default)
+python run-images.py <cartella>           # Cartella personalizzata
+```
 
 ## 🔧 Troubleshooting
 
