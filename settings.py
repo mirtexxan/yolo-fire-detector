@@ -95,7 +95,7 @@ class TrainingSettings:
     
     # === MODELLO ===
     MODEL_SIZE = "n"      # Dimensione modello: 'n' (nano), 's' (small), 'm' (medium), 'l' (large)
-    DEVICE = 0            # GPU device id (0 = prima GPU, -1 = CPU)
+    DEVICE = "cpu"        # Device per training: 'cpu' o numero GPU (0, 1, 2, ...)
     
     # === TRAINING ===
     EPOCHS = 100          # Numero totale di epoche di training

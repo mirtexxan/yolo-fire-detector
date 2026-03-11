@@ -58,7 +58,7 @@ def train_model(
     epochs: int = TrainingSettings.EPOCHS,
     batch_size: int = TrainingSettings.BATCH_SIZE,
     image_size: int = TrainingSettings.IMAGE_SIZE,
-    device: int = TrainingSettings.DEVICE,
+    device: str = TrainingSettings.DEVICE,
 ) -> None:
     """
     Addestra il modello YOLO sulla detection del fuoco.
@@ -68,7 +68,7 @@ def train_model(
         epochs: Numero di epoche di training - default da TrainingSettings
         batch_size: Batch size per il training - default da TrainingSettings
         image_size: Dimensione delle immagini di input - default da TrainingSettings
-        device: GPU device id - default da TrainingSettings
+        device: Device per training ('cpu' o numero GPU) - default da TrainingSettings
     """
     
     # Verifica che il dataset esista
@@ -197,9 +197,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--device",
-        type=int,
+        type=str,
         default=TrainingSettings.DEVICE,
-        help=f"GPU device id (default: {TrainingSettings.DEVICE})"
+        help=f"Device per training: 'cpu' o numero GPU (default: {TrainingSettings.DEVICE})"
     )
     parser.add_argument(
         "--val-only",
