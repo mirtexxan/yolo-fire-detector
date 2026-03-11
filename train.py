@@ -63,14 +63,129 @@ def train_model(
 ) -> None:
     """
     Addestra il modello YOLO sulla detection del fuoco.
-    
+
     Args:
         model_size: Dimensione del modello ('n', 's', 'm', 'l') - default da TrainingSettings
         epochs: Numero di epoche di training - default da TrainingSettings
-        batch_size: Batch size per il training - default da TrainingSettings
+        batch_size: Batch size per step di training - default da TrainingSettings
         image_size: Dimensione delle immagini di input - default da TrainingSettings
         device: Device per training ('cpu' o numero GPU) - default da TrainingSettings
+        resume: Se True, riprende da checkpoint esistente
     """
+
+    # Setup ambiente cloud
+    setup_cloud_environment()
+
+    # Verifica che il dataset esista
+    dataset_root = DatasetGenerationSettings.DATASET_ROOT
+    if not os.path.exists(dataset_root):
+        raise FileNotFoundError(
+            f"Dataset non trovato in {dataset_root}\n"
+            f"Esegui prima: python generator.py"
+        )
+
+    images_train = os.path.join(dataset_root, "images", "train")
+    if not os.path.exists(images_train) or len(os.listdir(images_train)) == 0:
+        raise FileNotFoundError(
+            f"Nessuna immagine di training trovata in {images_train}\n"
+            f"Esegui prima: python generator.py"
+        )
+
+    # Crea il file data.yaml
+    yaml_path = create_dataset_yaml()
+
+    # Carica il modello
+    print("\n" + "="*60)
+    print(f"Caricamento modello YOLOv8{model_size}...")
+    print("="*60)
+    model = YOLO(f"yolov8{model_size}.pt")
+
+    # Training
+    print("\n" + "="*60)
+    print("Inizio training...")
+    print("="*60)
+
+    # Controlla se esiste un ultimo checkpoint per resume
+    resume_flag = False
+    ckpt_path = os.path.join(
+        TrainingSettings.PROJECT_NAME,
+        TrainingSettings.EXPERIMENT_NAME,
+        "weights",
+        "last.pt",
+    )
+    if resume and os.path.exists(ckpt_path):
+        resume_flag = True
+        print(f"🔁 Checkpoint trovato ({ckpt_path}), il training continuerà da qui")
+    elif resume and not os.path.exists(ckpt_path):
+        print("⚠️ Resume richiesto ma nessun checkpoint troviato, si parte da zero.")
+
+    results = model.train(
+        data=yaml_path,
+        epochs=epochs,
+        imgsz=image_size,
+        batch=batch_size,
+        patience=TrainingSettings.PATIENCE,
+        device=device,
+        project=TrainingSettings.PROJECT_NAME,
+        name=TrainingSettings.EXPERIMENT_NAME,
+        exist_ok=TrainingSettings.OVERWRITE_EXISTING,
+        verbose=TrainingSettings.VERBOSE,
+        resume=resume_flag,
+        # Hyperparameters
+        lr0=TrainingSettings.LEARNING_RATE_INIT,
+        lrf=TrainingSettings.LEARNING_RATE_FINAL,
+        momentum=TrainingSettings.MOMENTUM,
+        weight_decay=TrainingSettings.WEIGHT_DECAY,
+        # Augmentation
+        degrees=TrainingSettings.ROTATION_DEGREES,
+        translate=TrainingSettings.TRANSLATE,
+        scale=TrainingSettings.SCALE,
+        flipud=TrainingSettings.FLIP_VERTICAL,
+        fliplr=TrainingSettings.FLIP_HORIZONTAL,
+        mosaic=TrainingSettings.MOSAIC,
+        # Mixed Precision
+        amp=TrainingSettings.MIXED_PRECISION,
+    )
+
+    print("\n" + "="*60)
+    print("Training completato!")
+    print("="*60)
+    print(f"Modello salvato in: runs/detect/fire_detector_runs/train/weights/best.pt")
+    print(f"Risultati disponibili in: runs/detect/fire_detector_runs/train/")
+
+    # --- export finale ------------------------------------------------
+    final_dir = os.path.join(TrainingSettings.PROJECT_NAME, TrainingSettings.EXPERIMENT_NAME, "final_export")
+    os.makedirs(final_dir, exist_ok=True)
+    final_model_path = os.path.join(final_dir, "best.pt")
+    print(f"\n🔧 Copio il modello finale in: {final_model_path}")
+    # copia file pesi
+    import shutil
+    shutil.copy(
+        os.path.join(TrainingSettings.PROJECT_NAME, TrainingSettings.EXPERIMENT_NAME, "weights", "best.pt"),
+        final_model_path,
+    )
+    # serializza le impostazioni usate in un file di testo
+    cfg_path = os.path.join(final_dir, "training_settings.txt")
+    with open(cfg_path, "w") as cfgf:
+        cfgf.write("# Training settings utilizzate\n")
+        for attr in dir(TrainingSettings):
+            if attr.isupper():
+                cfgf.write(f"{attr} = {getattr(TrainingSettings, attr)}\n")
+    print(f"⚙️ Impostazioni di training salvate in: {cfg_path}")
+    print("📁 Cartella finale pronta per essere copiata su un'altra macchina")
+
+    # Suggerimenti per Colab
+    try:
+        import google.colab
+        print("\n" + "="*60)
+        print("GOOGLE COLAB - ISTRUZIONI PER SCARICARE")
+        print("="*60)
+        print("from google.colab import files")
+        print(f"files.download('{final_model_path}')")
+        print(f"files.download('{cfg_path}')")
+        print("="*60)
+    except ImportError:
+        pass
     
     # Verifica che il dataset esista
     dataset_root = DatasetGenerationSettings.DATASET_ROOT
