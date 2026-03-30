@@ -1,51 +1,8 @@
 # YOLO Fire Detector
 
-YOLO Fire Detector e' un progetto per il rilevamento di incendi costruito attorno a tre idee semplici:
+Repository per generare dataset sintetici di fuoco, addestrare YOLOv8 con config YAML e usare il modello finale in inferenza locale o cloud.
 
-- generare un dataset sintetico riproducibile a partire da immagini base in `base_fire_images/`
-- addestrare YOLOv8 con una pipeline configurabile da file YAML
-- usare il modello addestrato in locale o in cloud mantenendo tracciabilita' di dataset, run e modello finale
-
-Il repository e' pensato sia come progetto dimostrativo sia come base concreta per iterare su dataset sintetici, training e inferenza video.
-
-## Cosa fa il progetto
-
-Il flusso completo e' questo:
-
-1. una config YAML descrive dataset, training e destinazione degli output
-2. la pipeline costruisce o riusa un dataset sintetico coerente con quei parametri
-3. YOLOv8 viene addestrato o ripreso da checkpoint se la run esiste gia'
-4. il modello migliore viene esportato e registrato con i metadati del dataset usato
-5. `detect.py` e gli script `run-*` usano il modello piu' recente oppure un peso esplicito passato da CLI
-
-## Entry point supportati
-
-Per training e generazione esiste un solo entrypoint supportato:
-
-```bash
-python run_experiment.py --config configs/local.default.yaml
-```
-
-Per preparare il bundle cloud:
-
-```bash
-python prepare_cloud_bundle.py
-```
-
-Lo zip include automaticamente i file `.pt` presenti nella root del repository, oltre a codice, notebook, config e immagini base.
-
-Per l'inferenza:
-
-```bash
-python run-detector.py
-python run-webcam.py
-python run-images.py
-python detect.py --source 0
-```
-
-`generator.py` e `train.py` restano moduli interni richiamati dalla pipeline, ma non sono piu' il percorso d'uso consigliato.
-
-## Quick Start
+## Uso rapido
 
 ### 1. Installa le dipendenze
 
@@ -53,22 +10,20 @@ python detect.py --source 0
 pip install -r requirements.txt
 ```
 
-### 2. Lancia una smoke run locale
+### 2. Verifica che la pipeline funzioni
 
 ```bash
 python run_experiment.py --config configs/local.smoke.yaml
 ```
 
-Questa run serve a verificare rapidamente che:
+Questa smoke run controlla end-to-end:
 
 - generazione dataset
-- training YOLO
+- training
 - export finale
-- registry del modello
+- registrazione del modello corrente
 
-funzionino end-to-end.
-
-### 3. Lancia una run locale standard
+### 3. Esegui una run locale normale
 
 ```bash
 python run_experiment.py --config configs/local.default.yaml
@@ -77,287 +32,293 @@ python run_experiment.py --config configs/local.default.yaml
 ### 4. Avvia il detector
 
 ```bash
-python run-detector.py
+python detect.py --source webcam
 ```
 
-## Architettura
+Se non passi `--weights`, il detector usa automaticamente il modello puntato da `artifacts/local/exports/latest.yaml`.
 
-### 1. Config layer
+## Workflow locale consigliato
 
-Le configurazioni vivono in `configs/`:
+Il percorso normale e':
 
-- `configs/local.default.yaml`: run locale standard
+1. lancia una config YAML con `run_experiment.py`
+2. verifica che sotto `artifacts/local/exports/` sia comparso il nuovo `.pt`
+3. usa `detect.py` senza passare i pesi, oppure passa un peso esplicito se vuoi testare un modello specifico
+
+Comando tipico:
+
+```bash
+python run_experiment.py --config configs/local.default.yaml
+python detect.py --source webcam
+```
+
+## Guida pratica a detect
+
+`detect.py` e' l'entry point principale per l'inferenza.
+
+### Sorgenti supportate
+
+#### Selettore webcam testuale
+
+```bash
+python detect.py
+python detect.py --source webcam
+```
+
+Comportamento:
+
+- fa una scansione delle webcam disponibili
+- mostra un elenco testuale con gli ID trovati
+- mette `*` sulle camere che hanno restituito un frame non nero
+- chiede quale camera aprire
+
+#### Webcam diretta per ID
+
+```bash
+python detect.py --source 0
+python detect.py --source 1
+```
+
+Usa questa modalita' se sai gia' quale camera vuoi aprire.
+
+#### Cartella immagini
+
+```bash
+python detect.py --source path/to/images
+```
+
+Comportamento:
+
+- analizza tutte le immagini della cartella
+- permette navigazione manuale tra le immagini
+- e' utile per controlli veloci su validation set o batch di test
+
+#### Video locale
+
+```bash
+python detect.py --source video.mp4
+```
+
+#### Stream RTMP o RTSP
+
+```bash
+python detect.py --source rtmp://server/app/stream
+python detect.py --source rtsp://server/stream
+```
+
+### Modello usato
+
+Default:
+
+```bash
+python detect.py --source webcam
+```
+
+In questo caso il detector usa l'ultimo export registrato.
+
+Peso esplicito:
+
+```bash
+python detect.py --weights path/to/model.pt --source webcam
+```
+
+Usa `--weights` quando vuoi testare un modello preciso e non il corrente.
+
+### Parametri importanti
+
+#### `--conf`
+
+```bash
+python detect.py --source webcam --conf 0.3
+python detect.py --source webcam --conf 0.7
+```
+
+Significato:
+
+- `0.3`: detector piu' permissivo, vede piu' box ma aumenta il rumore
+- `0.5`: valore intermedio ragionevole per partire
+- `0.7`: detector piu' severo, meno falsi positivi ma rischi di perdere detections deboli
+
+#### `--device`
+
+```bash
+python detect.py --source webcam --device cpu
+python detect.py --source webcam --device 0
+```
+
+Significato:
+
+- `cpu`: inferenza sul processore
+- `0`: inferenza sulla GPU 0
+
+Se hai GPU CUDA disponibile, `--device 0` e' in genere molto piu' veloce.
+
+### Controlli durante l'uso
+
+Per webcam, video e stream:
+
+- `q` o `Esc`: esce
+- `s`: salva il frame corrente in `detections/`
+
+Per cartella immagini:
+
+- `a` o freccia sinistra: immagine precedente
+- `d` o freccia destra: immagine successiva
+- `s`: salva l'immagine annotata
+- `q` o `Esc`: esce
+
+## Configurazioni YAML
+
+Le configurazioni vivono in `configs/`.
+
+File principali:
+
 - `configs/local.smoke.yaml`: test rapido locale
-- `configs/cloud.default.yaml`: base per Colab/Kaggle
-- altri preset cloud pronti in `configs/cloud.*.yaml`
+- `configs/local.default.yaml`: run locale standard
+- `configs/cloud.default.yaml`: base per Colab
+- `configs/cloud.*.yaml`: preset cloud gia' pronti
 
-La config controlla:
+Le config controllano:
 
 - root persistente degli output
-- lista esplicita delle immagini base (`dataset.fire_image_paths`)
-- parametri del dataset
+- immagini base del fuoco in `dataset.fire_image_paths`
+- parametri del dataset sintetico
 - parametri del training
-- override avanzati su trasformazioni, dataset e training
+- override avanzati di dataset, trasformazioni e training
 
-### 2. Orchestrazione
+### Cambiare immagini base
 
-`run_experiment.py` e' l'orchestratore centrale. Le sue responsabilita' sono:
+Una sola immagine:
 
-- leggere la config YAML
-- calcolare il fingerprint del dataset richiesto
-- riusare un dataset compatibile se gia' presente
-- generare il dataset se manca o se i parametri sono cambiati
-- costruire una label leggibile per la run
-- decidere se fare resume dal checkpoint esistente
-- lanciare il training
-- esportare il modello finale e registrarlo con i metadati
-
-### 3. Dataset generation
-
-`generator.py` genera immagini positive e negative con:
-
-- background sintetici randomizzati
-- trasformazioni geometriche e fotometriche sul fuoco
-- selezione casuale tra le immagini presenti in `dataset.fire_image_paths`
-- split train/val automatico
-
-Ogni dataset viene salvato in una cartella separata identificata da slug della label e fingerprint, per esempio:
-
-```text
-artifacts/local/datasets/synthetic-fire-default-a1b2c3d4e5/
+```yaml
+dataset:
+  fire_image_paths:
+    - base_fire_images/fire.png
 ```
 
-Convenzione di naming del dataset:
+Una immagine diversa:
+
+```yaml
+dataset:
+  fire_image_paths:
+    - base_fire_images/fire2.png
+```
+
+Un sottoinsieme esplicito:
+
+```yaml
+dataset:
+  fire_image_paths:
+    - base_fire_images/fire.png
+    - base_fire_images/fire2.png
+```
+
+Se la lista contiene piu' immagini, la generazione sceglie casualmente tra quelle specificate.
+
+## Output della pipeline
+
+La root locale di default e' `artifacts/local/`.
+
+### Dataset
+
+```text
+artifacts/local/datasets/<dataset-label-slug>-<fingerprint>/
+```
+
+Dentro trovi:
+
+- `yolo_dataset.yaml`: file usato da Ultralytics per training/validation
+- `dataset_manifest.yaml`: metadata del dataset generato
+- `images/`
+- `labels/`
+
+Convenzione di naming:
 
 - `<dataset-label-slug>-<fingerprint>`
-- la label viene normalizzata in minuscolo e i separatori diventano `-`
-- il fingerprint e' un hash corto dei parametri che definiscono davvero il dataset
-- se cambi immagini base, numero immagini, split, seed o override rilevanti, cambia anche il fingerprint
+- il fingerprint cambia quando cambiano i parametri che definiscono davvero il dataset
 
-Dentro la cartella c'e' anche `dataset_manifest.yaml`, che descrive:
-
-- parametri usati
-- fingerprint
-- conteggi train/val
-- statistiche del dataset generato
-
-### 4. Training
-
-`train.py` contiene le utility di training usate dalla pipeline. La run YOLO viene salvata in una cartella con nome leggibile, per esempio:
+### Run
 
 ```text
-artifacts/local/runs/local-smoke-test-yolov8n-dataset-a1b2c3d4e5/
+artifacts/local/runs/<run-label>/
 ```
+
+Dentro trovi:
+
+- `resolved_config.yaml`
+- `pipeline_summary.yaml`
+- `training_run.yaml`
+- plot e diagnostica YOLO
 
 Convenzione di naming della run:
 
 - `<environment>-<project-label>-<training-label-ridotta>-<dataset-label-ridotta>-<fingerprint>`
-- ogni segmento viene convertito in slug
-- i token ripetuti vengono eliminati automaticamente, quindi se `training.label` contiene gia' `yolov8n` non viene aggiunto una seconda volta da `training.model_size`
-- il fingerprint finale resta quello del dataset, cosi' e' immediato capire quale dataset sintetico ha prodotto quella run
+- i token duplicati vengono eliminati automaticamente
+- il fingerprint finale e' quello del dataset usato
 
-Dentro la run trovi:
-
-- file grafici e metriche generate da YOLO
-- `resolved_config.yaml`
-- `pipeline_summary.yaml`
-- `training_run.yaml`
-
-Durante il training la cartella contiene anche `weights/` con i checkpoint YOLO. Dopo una run completata con successo, i checkpoint vengono rimossi automaticamente e resta solo il modello finale registrato in `artifacts/local/exports/`.
-
-`training_run.yaml` e' il file canonico che salva il modello/peso effettivamente usato e i parametri finali del training.
-
-### 5. Export registry
-
-Alla fine della pipeline il modello finale viene registrato in:
+### Export finale
 
 ```text
 artifacts/local/exports/
 ```
 
-In particolare:
+Dentro trovi:
 
-- `exports/<run_label>.pt`: modello finale esportato
-- `exports/<run_label>.yaml`: metadati di dataset e run
-- `exports/latest.yaml`: puntatore all'export piu' recente
+- `exports/<run_label>.pt`: modello finale per inferenza
+- `exports/<run_label>.yaml`: metadata sintetici dell'export
+- `exports/latest.yaml`: puntatore stabile all'export corrente
 
-I metadata salvano path relativi alla root persistente, non path assoluti della macchina locale. `detect.py`, se non riceve `--weights`, prova a leggere proprio questo registry.
-
-## Struttura del repository
-
-I file piu' importanti sono:
-
-- `run_experiment.py`: entrypoint unico per generation + training
-- `prepare_cloud_bundle.py`: crea lo zip per Colab/Kaggle
-- `cloud_train.ipynb`: notebook cloud persistente
-- `detect.py`: inferenza da webcam, stream, video o immagini
-- `run-detector.py`: menu interattivo per detection
-- `generator.py`: modulo di generazione dataset
-- `train.py`: modulo di training YOLO
-- `transformations.py`: trasformazioni visuali e augmentazioni
-- `utils.py`: utility di salvataggio e I/O
-- `settings.py`: default statici delle classi di configurazione
-- `TRAINING_PRESETS.md`: panoramica dei preset cloud per esperimenti
-
-## Come usare il repo in locale
-
-### Workflow consigliato
-
-Per lavorare bene in locale il percorso normale e':
-
-```bash
-python run_experiment.py --config configs/local.default.yaml
-```
-
-Poi:
-
-```bash
-python run-detector.py
-```
-
-oppure:
-
-```bash
-python detect.py --source 0
-```
-
-### Smoke test
-
-Per verificare che tutto sia ancora integro dopo modifiche al codice:
-
-```bash
-python run_experiment.py --config configs/local.smoke.yaml
-```
-
-### Cambiare parametri
-
-Il modo corretto per modificare una run non e' cambiare il codice, ma:
-
-1. duplicare una config YAML
-2. modificare label, dataset e training
-3. rilanciare `run_experiment.py`
-
-Per usare il default:
-
-```yaml
-dataset:
-  fire_image_paths:
-    - base_fire_images/fire.png
-```
-
-Per usare una sola immagine diversa:
-
-```yaml
-dataset:
-  fire_image_paths:
-    - base_fire_images/fire2.png
-```
-
-Per usare un sottoinsieme scelto da te:
-
-```yaml
-dataset:
-  fire_image_paths:
-    - base_fire_images/fire2.png
-    - base_fire_images/fire.png
-```
-
-Se la lista contiene una sola immagine, viene usata solo quella. Se contiene piu' immagini, la pipeline sceglie casualmente tra quelle presenti. Se non specifichi niente, il default resta una lista con `base_fire_images/fire.png`.
-
-Questo mantiene separati:
-
-- dataset diversi
-- run diverse
-- modelli finali diversi
-
-## Come usare il modello
-
-### Modalita' interattiva
-
-```bash
-python run-detector.py
-```
-
-### Webcam
-
-```bash
-python run-webcam.py
-python detect.py --source 0
-```
-
-### Cartella immagini
-
-```bash
-python run-images.py
-python detect.py --source path/to/images
-```
-
-### Video o stream
-
-```bash
-python detect.py --source video.mp4
-python detect.py --source rtmp://server/app/stream
-python detect.py --source rtsp://server/stream
-```
-
-### Peso personalizzato
-
-```bash
-python detect.py --weights path/to/model.pt --source 0
-```
-
-## Output e artefatti
-
-Nel contesto di questo progetto, gli artefatti sono tutti i file generati dalla pipeline e non scritti a mano nel repository. Per esempio:
-
-- dataset generati
-- manifest YAML del dataset
-- checkpoint di training
-- export finali del modello
-- registry degli export
-- zip preparato per il cloud
-
-Per questo vengono ignorati da git in `.gitignore`.
+`detect.py` legge `latest.yaml` quando non passi `--weights`.
 
 ## Launch profiles in VS Code
 
-Sono presenti due configurazioni in `.vscode/launch.json`:
+In `/.vscode/launch.json` ci sono profili pronti per:
 
-- `Local Pipeline (YAML)`
-- `Create Cloud Bundle`
+- pipeline locale
+- bundle cloud
+- detect da webcam con latest export
+- detect su validation images
+- detect da video file
+- detect da stream
+- detect da cartella immagini
 
 ## Troubleshooting rapido
 
-### Non trova il modello
+### Il detector non trova il modello
 
-Esegui una run locale:
+Esegui una run locale prima:
 
 ```bash
 python run_experiment.py --config configs/local.default.yaml
 ```
 
-### Vuoi usare la GPU
+### Vuoi rigenerare il dataset anche se esiste gia'
 
-Aggiorna la config YAML o il campo `device` nella config che stai usando.
-
-### Il dataset va rigenerato
-
-Imposta nella config:
+Imposta:
 
 ```yaml
 dataset:
   force_regenerate: true
 ```
 
+### Vuoi usare la GPU
+
+In training: imposta `training.device` nella config.
+
+In detect:
+
+```bash
+python detect.py --source webcam --device 0
+```
+
 ### Ti serve il cloud
 
-Usa la guida dedicata in `CLOUD_TRAINING.md`.
+Usa [CLOUD_TRAINING.md](CLOUD_TRAINING.md).
 
-## Note finali
+## File principali
 
-Questo repository oggi ha una separazione netta:
-
-- `README.md`: presentazione progetto e guida utente generale
-- `CLOUD_TRAINING.md`: procedura operativa per Colab e, in fondo, Kaggle
-
-Se vuoi estendere il progetto, il punto giusto da cui partire e' quasi sempre `configs/` piu' `run_experiment.py`.
+- `run_experiment.py`: pipeline generation + training
+- `detect.py`: inferenza da webcam, stream, video o immagini
+- `prepare_cloud_bundle.py`: zip per Colab
+- `cloud_train.ipynb`: notebook cloud persistente
+- `TRAINING_PRESETS.md`: panoramica preset cloud
