@@ -1,4 +1,4 @@
-"""Creates a zip bundle of the project for Colab, Kaggle, or similar notebook services."""
+"""Creates a zip bundle of the project for Colab or similar notebook services."""
 
 import argparse
 from pathlib import Path
@@ -7,7 +7,9 @@ import zipfile
 
 DEFAULT_EXCLUDES = {
     ".git",
+    ".venv",
     ".vscode",
+    ".ipynb_checkpoints",
     "__pycache__",
     "artifacts",
     "dataset",
@@ -15,6 +17,8 @@ DEFAULT_EXCLUDES = {
     "fire_detector_runs",
     "runs",
     "dist",
+    "env",
+    "venv",
 }
 
 DEFAULT_INCLUDE_NAMES = {
@@ -43,12 +47,12 @@ def should_skip(path: Path, include_dataset: bool, include_runs: bool) -> bool:
     return any(part in excludes for part in parts)
 
 
-def should_include(path: Path) -> bool:
-    if path.name in DEFAULT_INCLUDE_NAMES or path.suffix.lower() in DEFAULT_INCLUDE_SUFFIXES:
+def should_include(relative_path: Path) -> bool:
+    if relative_path.name in DEFAULT_INCLUDE_NAMES or relative_path.suffix.lower() in DEFAULT_INCLUDE_SUFFIXES:
         return True
-    if path.suffix.lower() == ".pt" and len(path.parts) == 1:
+    if relative_path.suffix.lower() == ".pt" and len(relative_path.parts) == 1:
         return True
-    return "base_fire_images" in path.parts and path.suffix.lower() == ".png"
+    return "base_fire_images" in relative_path.parts and relative_path.suffix.lower() == ".png"
 
 
 def create_bundle(project_root: Path, output_path: Path, include_dataset: bool, include_runs: bool) -> None:
@@ -62,7 +66,7 @@ def create_bundle(project_root: Path, output_path: Path, include_dataset: bool, 
             relative_path = candidate.relative_to(project_root)
             if should_skip(relative_path, include_dataset, include_runs):
                 continue
-            if not should_include(candidate):
+            if not should_include(relative_path):
                 continue
             archive.write(candidate, arcname=str(relative_path))
             files_added += 1
@@ -71,7 +75,7 @@ def create_bundle(project_root: Path, output_path: Path, include_dataset: bool, 
     print(f"Bundle creato: {output_path}")
     print(f"File inclusi: {files_added}")
     print(f"Dimensione: {bundle_size_mb:.2f} MB")
-    print("Passo successivo: carica lo zip su Colab o come dataset/input in Kaggle.")
+    print("Passo successivo: carica lo zip in Colab o in Google Drive.")
 
 
 def main() -> None:

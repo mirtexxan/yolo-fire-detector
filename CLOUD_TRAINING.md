@@ -1,36 +1,8 @@
 # Cloud Training Guide
 
-Questo documento descrive come usare il repository in cloud nello stato attuale del progetto.
+Guida operativa breve per usare `cloud_train.ipynb` con gli output attuali del progetto.
 
-La logica corretta oggi e' questa:
-
-- l'entrypoint di training e generazione e' `run_experiment.py`
-- il notebook cloud supportato e' `cloud_train.ipynb`
-- la configurazione cloud di base e' `configs/cloud.default.yaml`
-- il bundle da caricare in cloud si prepara con `prepare_cloud_bundle.py`
-
-La piattaforma consigliata e' Google Colab, perche' il notebook attuale e' pensato prima di tutto per Drive persistente. In fondo trovi anche la variante Kaggle.
-
-## Obiettivo del workflow cloud
-
-Il workflow cloud non deve limitarsi a lanciare un training una tantum. Deve anche:
-
-- riusare un dataset se i parametri richiesti sono identici
-- salvare sempre checkpoint, export e metadati nello stesso punto persistente
-- ripartire in resume se trova `weights/last.pt`
-- separare in cartelle diverse dataset e run con parametri diversi
-
-Questo e' esattamente quello che fa la pipeline attuale.
-
-## File da conoscere
-
-- `prepare_cloud_bundle.py`
-- `cloud_train.ipynb`
-- `run_experiment.py`
-- `configs/cloud.default.yaml`
-- `TRAINING_PRESETS.md`
-
-## Passo 1: prepara il bundle dal repository locale
+## Passo 1: prepara il bundle in locale
 
 Da VS Code locale:
 
@@ -38,259 +10,195 @@ Da VS Code locale:
 python prepare_cloud_bundle.py
 ```
 
-Questo crea:
+Output atteso:
 
 ```text
 dist/yolo-fire-detector-cloud.zip
 ```
 
-Quello zip contiene il codice necessario per il training cloud, incluso il notebook e i file di configurazione.
-Include anche automaticamente i file `.pt` presenti nella root del repository, per esempio `yolov8n.pt`, `yolov8s.pt` o `yolov8m.pt` se li hai scaricati localmente.
+Questo e' il nome che il notebook cerca automaticamente.
 
-## Passo 2: apri Colab e abilita la GPU
+## Passo 2: carica lo zip dove ti e' piu' comodo
+
+Puoi mettere `yolo-fire-detector-cloud.zip` in uno di questi posti:
+
+- `/content`
+- Google Drive
+
+Non serve piu' spostarlo a mano nella cartella persistente finale.
+
+## Passo 3: apri `cloud_train.ipynb`
 
 In Colab:
 
-1. apri un nuovo notebook oppure carica `cloud_train.ipynb`
-2. vai su Runtime -> Change runtime type
-3. seleziona GPU
+1. apri il notebook
+2. abilita la GPU in Runtime -> Change runtime type
+3. esegui le celle in ordine
 
-## Passo 3: carica o rendi disponibile il bundle
+## Passo 4: lascia lavorare il notebook
 
-Hai due opzioni pratiche:
+Le prime celle fanno automaticamente questo:
 
-### Opzione A: upload diretto in sessione
-
-Carica `yolo-fire-detector-cloud.zip` in `/content`.
-
-### Opzione B: salvalo in Drive
-
-Carica `yolo-fire-detector-cloud.zip` in una cartella di Google Drive e poi copialo nella root usata dal notebook.
-
-Il notebook cerca prima di tutto il file in una root persistente, quindi questa opzione e' la piu' comoda se prevedi piu' sessioni.
-
-## Passo 4: esegui il notebook `cloud_train.ipynb`
-
-Il notebook attuale fa questo, in ordine:
-
-1. monta Google Drive su Colab
-2. usa come root persistente:
+1. montano Drive se sei in Colab
+2. creano la root persistente se non esiste
+3. cercano `yolo-fire-detector-cloud.zip` nel contesto locale e in Drive
+4. spostano lo zip in:
 
 ```text
-/content/drive/MyDrive/yolo-fire-detector
+<PERSISTENT_ROOT>/inputs/
 ```
 
-3. prepara le cartelle persistenti:
+5. estraggono il repository in:
 
 ```text
-repo/
-inputs/
-datasets/
-runs/
-exports/
+<PERSISTENT_ROOT>/repo/
 ```
 
-4. cerca `yolo-fire-detector-cloud.zip`
-5. se necessario aggiorna il codice dentro `repo/`
-6. installa le dipendenze da `requirements.txt`
-7. costruisce `configs/cloud.runtime.yaml`
-8. lancia:
+Quindi non devi fare file management manuale.
+
+## Passo 5: scegli la config runtime
+
+Nel notebook hai due modalita'.
+
+### Modalita' A: usa una config gia' pronta senza toccare i parametri
+
+Imposta:
+
+- `USE_READY_CONFIG_AS_IS = True`
+- `READY_CONFIG_NAME = 'cloud.recall.yaml'`
+
+In questo caso il notebook prende quella config cosi' com'e' e cambia solo `project.persistent_root`.
+
+### Modalita' B: parti da un preset e poi sovrascrivi i campi principali
+
+Imposta:
+
+- `USE_READY_CONFIG_AS_IS = False`
+- `BASE_CONFIG_NAME = 'cloud.default.yaml'`
+
+e poi eventualmente modifichi:
+
+- `BASE_CONFIG_NAME`
+- `DATASET_LABEL`
+- `TRAINING_LABEL`
+- `NUM_IMAGES`
+- `IMAGE_SIZE`
+- `EPOCHS`
+- `BATCH_SIZE`
+- `MODEL_SIZE`
+- `DEVICE`
+
+Il notebook genera poi:
+
+```text
+repo/configs/cloud.runtime.yaml
+```
+
+## Passo 6: lancia il training
+
+La cella finale esegue:
 
 ```bash
 python run_experiment.py --config configs/cloud.runtime.yaml
 ```
 
-## Perche' Drive e' importante
+Non devi lanciare `generator.py` o `train.py` separatamente.
 
-Se non salvi su Drive, Colab perde tutto quando la sessione finisce.
+## Dove finiscono gli output
 
-Con la root persistente attuale invece conservi:
-
-- dataset generati
-- manifest YAML del dataset
-- checkpoint YOLO
-- config risolte
-- export finali
-- registry degli export
-
-Questo e' il motivo per cui il notebook e' costruito intorno a una root fissa e non a una cartella temporanea in `/content`.
-
-## Come funziona il riuso del dataset
-
-La pipeline legge i parametri della config e costruisce un fingerprint del dataset richiesto usando, tra le altre cose:
-
-- label dataset
-- numero di immagini
-- dimensione immagine
-- negative ratio
-- train split
-- seed
-- impostazioni di trasformazione
-- impostazioni dataset rilevanti
-- lista esplicita delle immagini base (`dataset.fire_image_paths`, es. `base_fire_images/fire.png`)
-
-Il dataset viene scritto in una cartella come questa:
-
-```text
-datasets/<dataset-label>-<fingerprint>/
-```
-
-E dentro trovi anche:
-
-```text
-dataset_manifest.yaml
-```
-
-Se un dataset compatibile esiste gia', la pipeline non lo rigenera.
-
-## Come funziona il resume del training
-
-La run ha una label leggibile che incorpora:
-
-- ambiente
-- label progetto
-- label training
-- modello YOLO
-- label dataset
-- fingerprint dataset
-
-Per esempio:
-
-```text
-cloud__drive-persistent__yolov8n-cloud__yolov8n__synthetic-fire-cloud__abc123def4
-```
-
-La run viene salvata in:
-
-```text
-runs/<run_label>/
-```
-
-Se nella run esiste:
-
-```text
-weights/last.pt
-```
-
-e la config ha:
-
-```yaml
-training:
-  resume: auto
-```
-
-allora la pipeline riparte automaticamente da quel checkpoint.
-
-## Come cambiare i parametri
-
-Il modo corretto non e' modificare a mano il codice Python del notebook. Il modo corretto e':
-
-1. partire da `configs/cloud.default.yaml`
-2. nel notebook scegliere il preset con `BASE_CONFIG_NAME`
-3. il notebook scrive `cloud.runtime.yaml` partendo da quel preset
-4. opzionalmente rifinire li' i parametri di dataset o training
-5. lanciare la pipeline
-
-I preset pronti sono documentati in `TRAINING_PRESETS.md` e includono configurazioni per recall, robustezza, piccoli incendi, hard negatives e modelli piu' capienti.
-
-Per scegliere una sola immagine:
-
-```yaml
-dataset:
-  fire_image_paths:
-    - base_fire_images/fire2.png
-```
-
-Per scegliere un sottoinsieme di immagini:
-
-```yaml
-dataset:
-  fire_image_paths:
-    - base_fire_images/fire2.png
-    - base_fire_images/fire.png
-```
-
-Se la lista contiene una sola immagine, viene usata solo quella. Se contiene piu' immagini, la pipeline sceglie casualmente tra quelle presenti. Se non specifichi niente, il default resta una lista con `base_fire_images/fire.png`.
-
-In pratica il notebook gia' fa questa parte per te.
-
-I parametri che normalmente cambi sono:
-
-- `dataset.label`
-- `dataset.num_images`
-- `dataset.image_size`
-- `dataset.force_regenerate`
-- `training.label`
-- `training.model_size`
-- `training.epochs`
-- `training.batch_size`
-- `training.device`
-- `training.resume`
-
-## Output finali in Colab
-
-Dopo il training troverai tutto sotto:
+In Colab, di default, tutto finisce sotto:
 
 ```text
 /content/drive/MyDrive/yolo-fire-detector
 ```
 
-Le cartelle principali sono:
-
 ### `datasets/`
 
-Contiene i dataset sintetici generati, uno per fingerprint.
-Ogni dataset include anche `dataset_manifest.yaml`, che salva i metadati del dataset in YAML con path relativi alla root persistente.
+Ogni dataset sta in:
+
+```text
+datasets/<dataset-label>-<fingerprint>/
+```
+
+Dentro trovi:
+
+- `yolo_dataset.yaml`
+- `dataset_manifest.yaml`
+- `images/`
+- `labels/`
 
 ### `runs/`
 
-Contiene le run YOLO complete, quindi:
+Ogni run sta in:
 
-- metriche
-- immagini di training/validation generate da YOLO
+```text
+runs/<run_label>/
+```
+
+Dentro trovi almeno:
+
 - `resolved_config.yaml`
 - `pipeline_summary.yaml`
 - `training_run.yaml`
+- metriche e diagnostica YOLO
 
-Durante il training la run contiene anche i checkpoint in `weights/`. Dopo una run completata con successo, i checkpoint vengono rimossi automaticamente e il modello finale resta nel registry `exports/`.
-
-`training_run.yaml` e' il file canonico con il modello/peso effettivamente usato insieme agli altri parametri del training.
+Durante il training possono esserci i checkpoint in `weights/`.
+Quando la run si chiude con successo, i checkpoint di resume vengono rimossi automaticamente.
 
 ### `exports/`
 
-Contiene il registry persistente degli export finali:
+Qui trovi quello che serve per l'inferenza finale:
 
 - `exports/<run_label>.pt`
 - `exports/<run_label>.yaml`
 - `exports/latest.yaml`
 
-I metadata usano path relativi alla root persistente del notebook, quindi restano portabili tra macchine e mount point diversi.
+`latest.yaml` punta all'export corrente.
 
-## Flusso operativo consigliato su Colab
+## Come salvare gli export sul PC locale
 
-Questo e' il percorso concreto piu' robusto:
+L'ultima cella del notebook:
 
-1. esegui `python prepare_cloud_bundle.py` in locale
-2. carica lo zip in Colab o in Drive
-3. apri `cloud_train.ipynb`
-4. lascia la root persistente su Drive
-5. imposta i parametri nella cella di config runtime
-6. esegui le celle in ordine
-7. se la sessione cade, riapri il notebook e rilancia: dataset e checkpoint verranno riusati quando compatibili
+1. legge `exports/latest.yaml`
+2. comprime tutta la cartella `exports/` in:
 
-## Troubleshooting Colab
+```text
+<PERSISTENT_ROOT>/downloads/yolo-fire-detector-exports.zip
+```
+
+3. stampa il comando Colab per scaricare quello zip sul PC locale
+
+Quello zip e' pensato per essere portato poi in locale e usato con `detect.py`.
+
+## Cosa succede se riapri una sessione
+
+Il flusso corretto e' semplicemente rieseguire il notebook.
+
+La pipeline gestisce automaticamente:
+
+- riuso del dataset se il fingerprint coincide
+- resume del training se la run e' compatibile e c'e' un checkpoint valido
+
+## Troubleshooting minimo
 
 ### Il notebook non trova lo zip
 
-Metti `yolo-fire-detector-cloud.zip` in uno dei percorsi attesi dal notebook oppure aggiorna la cella che definisce `ZIP_CANDIDATES`.
+Metti `yolo-fire-detector-cloud.zip` in uno di questi posti e riesegui la cella di sync:
 
-### Vuoi forzare l'aggiornamento del codice
+- `/content`
+- Google Drive
 
-Imposta `FORCE_PROJECT_REFRESH = True` nella cella di sync del progetto.
+### Vuoi forzare l'aggiornamento del codice estratto
+
+Nella cella di sync imposta:
+
+```python
+FORCE_PROJECT_REFRESH = True
+```
 
 ### Vuoi rigenerare il dataset
 
-Nella cella che costruisce `cloud.runtime.yaml`, imposta:
+Nella config runtime imposta:
 
 ```yaml
 dataset:
@@ -306,39 +214,12 @@ training:
   resume: never
 ```
 
-### Vuoi cambiare cartella persistente
+## Checklist finale
 
-Aggiorna `PERSISTENT_ROOT` nella prima cella del notebook.
-
-## Kaggle
-
-Il notebook attuale supporta anche Kaggle, ma Colab resta la piattaforma primaria perche' il flusso con Google Drive e' piu' naturale.
-
-Su Kaggle la root persistente prevista e':
-
-```text
-/kaggle/working/yolo-fire-detector
-```
-
-Il principio resta identico:
-
-- estrai il progetto nella root prevista
-- installa le dipendenze
-- genera `cloud.runtime.yaml`
-- lancia `run_experiment.py`
-- conserva dataset, run e modelli dentro la stessa root di lavoro
-
-La differenza pratica e' che su Kaggle dovrai di solito preparare prima il file zip come input del notebook.
-
-## In sintesi
-
-Lo stato attuale del repository in cloud e' questo:
-
-- un solo entrypoint: `run_experiment.py`
-- un solo notebook cloud supportato: `cloud_train.ipynb`
-- una root persistente stabile
-- caching del dataset via fingerprint
-- resume automatico della run
-- registry persistente dei modelli finali
-
-Se devi usare il repo in cloud, questo e' il percorso corretto.
+1. `python prepare_cloud_bundle.py`
+2. carichi `dist/yolo-fire-detector-cloud.zip`
+3. apri `cloud_train.ipynb`
+4. scegli `USE_READY_CONFIG_AS_IS = True` se vuoi lanciare una config pronta senza modifiche manuali
+5. esegui le celle in ordine
+6. trovi i risultati in `datasets/`, `runs/`, `exports/`
+7. scarichi `downloads/yolo-fire-detector-exports.zip` sul PC locale
