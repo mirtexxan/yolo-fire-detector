@@ -14,6 +14,18 @@
       ]
     },
     {
+      "name": "Dataset Generation Only (YAML)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/run_generation.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "--config",
+        "${input:generationConfigPath}"
+      ]
+    },
+    {
       "name": "Detect Webcam (Latest Export)",
       "type": "debugpy",
       "request": "launch",
@@ -113,6 +125,12 @@
     }
   ],
   "inputs": [
+    {
+      "id": "generationConfigPath",
+      "type": "promptString",
+      "description": "Path del file YAML per la sola generazione dataset",
+      "default": "${workspaceFolder}/configs/local.generate-only.yaml"
+    },
     {
       "id": "detectVideoPath",
       "type": "promptString",

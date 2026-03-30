@@ -1,0 +1,26 @@
+project:
+  environment: local
+  label: generate-only
+  persistent_root: artifacts/local
+
+dataset:
+  label: generate-only-smoke
+  fire_image_paths:
+    - base_fire_images/fire.png
+  num_images: 24
+  image_size: 320
+  negative_ratio: 0.35
+  train_split: 0.8
+  seed: 42
+  force_regenerate: false
+
+# Sezione opzionale: puoi lasciare solo le chiavi che vuoi cambiare.
+dataset_settings_overrides:
+  fire_scale_min: 0.06
+  fire_scale_max: 0.45
+
+# Sezione opzionale: puoi lasciare solo le chiavi che vuoi cambiare.
+image_transform_overrides:
+  rotation_deg_min: -60
+  rotation_deg_max: 60
+  perspective_shift: 60
