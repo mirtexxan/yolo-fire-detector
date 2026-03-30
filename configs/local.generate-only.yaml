@@ -7,6 +7,9 @@ dataset:
   label: generate-only-smoke
   fire_image_paths:
     - base_fire_images/fire.png
+    - base_fire_images/fire_nobg.png
+    - base_fire_images/piazzola.jpg
+    - base_fire_images/piazzola_nobg.png
   num_images: 24
   image_size: 320
   negative_ratio: 0.35
