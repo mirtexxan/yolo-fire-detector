@@ -21,7 +21,6 @@ DEFAULT_INCLUDE_NAMES = {
     "README.md",
     "CLOUD_TRAINING.md",
     "requirements.txt",
-    "fire.png",
     "yolov8n.pt",
 }
 
@@ -45,7 +44,9 @@ def should_skip(path: Path, include_dataset: bool, include_runs: bool) -> bool:
 
 
 def should_include(path: Path) -> bool:
-    return path.name in DEFAULT_INCLUDE_NAMES or path.suffix.lower() in DEFAULT_INCLUDE_SUFFIXES
+    if path.name in DEFAULT_INCLUDE_NAMES or path.suffix.lower() in DEFAULT_INCLUDE_SUFFIXES:
+        return True
+    return "base_fire_images" in path.parts and path.suffix.lower() == ".png"
 
 
 def create_bundle(project_root: Path, output_path: Path, include_dataset: bool, include_runs: bool) -> None:

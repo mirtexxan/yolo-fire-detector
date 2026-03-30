@@ -57,7 +57,7 @@ class DatasetGenerationSettings:
     """Impostazioni per la generazione del dataset."""
     
     # Path
-    FIRE_IMAGE_PATH = r"fire.png"
+    FIRE_IMAGE_PATHS = [r"base_fire_images/fire.png"]
     DATASET_ROOT = "dataset"
     
     # Dataset

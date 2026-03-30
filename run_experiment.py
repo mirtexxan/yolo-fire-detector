@@ -59,7 +59,7 @@ def default_config() -> dict[str, Any]:
         },
         "dataset": {
             "label": "synthetic-fire",
-            "fire_image_path": DatasetGenerationSettings.FIRE_IMAGE_PATH,
+            "fire_image_paths": list(DatasetGenerationSettings.FIRE_IMAGE_PATHS),
             "num_images": DatasetGenerationSettings.NUM_IMAGES,
             "image_size": DatasetGenerationSettings.IMAGE_SIZE,
             "negative_ratio": DatasetGenerationSettings.NEGATIVE_RATIO,
@@ -156,12 +156,13 @@ def dataset_ready(dataset_root: Path, expected_fingerprint: str, expected_images
     return total_images == expected_images and total_labels == expected_images and train_images > 0
 
 
-def build_dataset_snapshot(config: dict[str, Any], fire_image_path: Path) -> dict[str, Any]:
+def build_dataset_snapshot(config: dict[str, Any], fire_image_paths: list[Path]) -> dict[str, Any]:
     """Build the fingerprinted dataset snapshot."""
     dataset_cfg = config["dataset"]
+    serialized_paths = [str(path) for path in fire_image_paths]
     return {
         "label": dataset_cfg["label"],
-        "fire_image_path": str(fire_image_path),
+        "fire_image_paths": serialized_paths,
         "num_images": dataset_cfg["num_images"],
         "image_size": dataset_cfg["image_size"],
         "negative_ratio": dataset_cfg["negative_ratio"],
@@ -169,7 +170,7 @@ def build_dataset_snapshot(config: dict[str, Any], fire_image_path: Path) -> dic
         "seed": dataset_cfg.get("seed"),
         "dataset_settings": collect_class_settings(
             DatasetGenerationSettings,
-            exclude={"DATASET_ROOT", "FIRE_IMAGE_PATH", "NUM_IMAGES", "IMAGE_SIZE", "NEGATIVE_RATIO", "TRAIN_SPLIT", "DEMO_MODE", "DEMO_WAIT_MS"},
+            exclude={"DATASET_ROOT", "FIRE_IMAGE_PATHS", "NUM_IMAGES", "IMAGE_SIZE", "NEGATIVE_RATIO", "TRAIN_SPLIT", "DEMO_MODE", "DEMO_WAIT_MS"},
         ),
         "image_transform": collect_class_settings(ImageTransformSettings),
     }
@@ -183,11 +184,18 @@ def prepare_dataset(config: dict[str, Any], project_root: Path) -> dict[str, Any
     assert persistent_root is not None
     datasets_root = persistent_root / "datasets"
 
-    fire_image_path = resolve_path(dataset_cfg["fire_image_path"], project_root)
-    if fire_image_path is None or not fire_image_path.exists():
-        raise FileNotFoundError(f"Fire image non trovata: {dataset_cfg['fire_image_path']}")
+    configured_fire_paths = dataset_cfg.get("fire_image_paths")
+    if not isinstance(configured_fire_paths, list) or not configured_fire_paths:
+        raise ValueError("dataset.fire_image_paths deve essere una lista non vuota")
 
-    snapshot = build_dataset_snapshot(config, fire_image_path)
+    fire_image_paths: list[Path] = []
+    for raw_path in configured_fire_paths:
+        resolved_path = resolve_path(str(raw_path), project_root)
+        if resolved_path is None or not resolved_path.exists():
+            raise FileNotFoundError(f"Fire image non trovata: {raw_path}")
+        fire_image_paths.append(resolved_path)
+
+    snapshot = build_dataset_snapshot(config, fire_image_paths)
     fingerprint = stable_hash(snapshot)
     dataset_folder_name = f"{dataset_cfg['label']}__{fingerprint}"
     dataset_root = datasets_root / dataset_folder_name
@@ -209,7 +217,7 @@ def prepare_dataset(config: dict[str, Any], project_root: Path) -> dict[str, Any
 
     stats = generate_dataset(
         dataset_root=str(dataset_root),
-        fire_image_path=str(fire_image_path),
+        fire_image_paths=[str(path) for path in fire_image_paths],
         num_images=dataset_cfg["num_images"],
         image_size=dataset_cfg["image_size"],
         negative_ratio=dataset_cfg["negative_ratio"],
@@ -361,6 +369,8 @@ def run_pipeline(config: dict[str, Any], config_path: Path) -> dict[str, Any]:
         "dataset_fingerprint": dataset_info["fingerprint"],
         "dataset_manifest_path": str(dataset_info["manifest_path"]),
         "dataset_reused": dataset_info["reused"],
+        "fire_image_paths": dataset_info["manifest"]["snapshot"]["fire_image_paths"],
+        "base_image_usage": dataset_info["manifest"].get("stats", {}).get("base_image_usage", {}),
         "resolved_config_path": str(run_dir / "resolved_config.yaml"),
     }
 

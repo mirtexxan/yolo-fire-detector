@@ -125,7 +125,7 @@ La pipeline legge i parametri della config e costruisce un fingerprint del datas
 - seed
 - impostazioni di trasformazione
 - impostazioni dataset rilevanti
-- path dell'immagine `fire.png`
+- lista esplicita delle immagini base (`dataset.fire_image_paths`, es. `base_fire_images/fire.png`)
 
 Il dataset viene scritto in una cartella come questa:
 
@@ -187,6 +187,25 @@ Il modo corretto non e' modificare a mano il codice Python del notebook. Il modo
 2. nel notebook scrivere una `cloud.runtime.yaml`
 3. cambiare li' i parametri di dataset o training
 4. lanciare la pipeline
+
+Per scegliere una sola immagine:
+
+```yaml
+dataset:
+  fire_image_paths:
+    - base_fire_images/fire2.png
+```
+
+Per scegliere un sottoinsieme di immagini:
+
+```yaml
+dataset:
+  fire_image_paths:
+    - base_fire_images/fire2.png
+    - base_fire_images/fire.png
+```
+
+Se la lista contiene una sola immagine, viene usata solo quella. Se contiene piu' immagini, la pipeline sceglie casualmente tra quelle presenti. Se non specifichi niente, il default resta una lista con `base_fire_images/fire.png`.
 
 In pratica il notebook gia' fa questa parte per te.
 

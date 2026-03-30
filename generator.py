@@ -2,6 +2,7 @@
 
 import random
 import shutil
+from collections.abc import Sequence
 
 import cv2
 import numpy as np
@@ -104,9 +105,27 @@ def generate_positive_sample(fire_rgba, image_size: int) -> tuple:
     return composed, label, bbox
 
 
+def normalize_fire_image_paths(
+    fire_image_paths: Sequence[str] | None,
+) -> list[str]:
+    """Normalizza i path delle immagini base del fuoco rimuovendo vuoti e duplicati."""
+    normalized: list[str] = []
+
+    if fire_image_paths:
+        for candidate in fire_image_paths:
+            clean = str(candidate).strip()
+            if clean and clean not in normalized:
+                normalized.append(clean)
+
+    if not normalized:
+        raise ValueError("Devi specificare almeno una immagine base del fuoco")
+
+    return normalized
+
+
 def generate_dataset(
     dataset_root: str = DatasetGenerationSettings.DATASET_ROOT,
-    fire_image_path: str = DatasetGenerationSettings.FIRE_IMAGE_PATH,
+    fire_image_paths: Sequence[str] = DatasetGenerationSettings.FIRE_IMAGE_PATHS,
     num_images: int = DatasetGenerationSettings.NUM_IMAGES,
     image_size: int = DatasetGenerationSettings.IMAGE_SIZE,
     negative_ratio: float = DatasetGenerationSettings.NEGATIVE_RATIO,
@@ -136,10 +155,11 @@ def generate_dataset(
 
     make_output_folders(dataset_root)
 
-    fire = load_fire_image(fire_image_path)
+    resolved_fire_paths = normalize_fire_image_paths(fire_image_paths)
+    fire_assets = {path: load_fire_image(path) for path in resolved_fire_paths}
 
     print("Avvio generazione dataset...")
-    print(f"Immagine fuoco: {fire_image_path}")
+    print(f"Immagini fuoco base: {resolved_fire_paths}")
     print(f"Cartella dataset: {dataset_root}")
     print(f"Numero immagini: {num_images}")
     print(f"Dimensione output: {image_size}x{image_size}")
@@ -150,6 +170,7 @@ def generate_dataset(
 
     num_negative = 0
     num_positive = 0
+    base_image_usage = {path: 0 for path in resolved_fire_paths}
 
     for i in range(num_images):
 
@@ -171,7 +192,10 @@ def generate_dataset(
 
         else:
             num_positive += 1
-            image, label, bbox = generate_positive_sample(fire, image_size)
+            selected_fire_path = random.choice(resolved_fire_paths)
+            selected_fire = fire_assets[selected_fire_path]
+            base_image_usage[selected_fire_path] += 1
+            image, label, bbox = generate_positive_sample(selected_fire, image_size)
             save_sample(
                 image=image,
                 label_text=label,
@@ -197,5 +221,6 @@ def generate_dataset(
         "negative_ratio": negative_ratio,
         "train_split": train_split,
         "seed": seed,
-        "fire_image_path": fire_image_path,
+        "fire_image_paths": resolved_fire_paths,
+        "base_image_usage": base_image_usage,
     }

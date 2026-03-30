@@ -5,7 +5,12 @@ project:
 
 dataset:
   label: synthetic-fire-default
-  fire_image_path: fire.png
+  fire_image_paths:
+    - base_fire_images/fire.png
+  # Per usare un sottoinsieme scelto da te, sostituisci con:
+  # fire_image_paths:
+  #   - base_fire_images/fire2.png
+  #   - base_fire_images/fire.png
   num_images: 100
   image_size: 640
   negative_ratio: 0.35

@@ -2,7 +2,7 @@
 
 YOLO Fire Detector e' un progetto per il rilevamento di incendi costruito attorno a tre idee semplici:
 
-- generare un dataset sintetico riproducibile a partire da `fire.png`
+- generare un dataset sintetico riproducibile a partire da immagini base in `base_fire_images/`
 - addestrare YOLOv8 con una pipeline configurabile da file YAML
 - usare il modello addestrato in locale o in cloud mantenendo tracciabilita' di dataset, run e modello finale
 
@@ -91,6 +91,7 @@ Le configurazioni vivono in `configs/`:
 La config controlla:
 
 - root persistente degli output
+- lista esplicita delle immagini base (`dataset.fire_image_paths`)
 - parametri del dataset
 - parametri del training
 - override avanzati su trasformazioni, dataset e training
@@ -114,6 +115,7 @@ La config controlla:
 
 - background sintetici randomizzati
 - trasformazioni geometriche e fotometriche sul fuoco
+- selezione casuale tra le immagini presenti in `dataset.fire_image_paths`
 - split train/val automatico
 
 Ogni dataset viene salvato in una cartella separata identificata da label e fingerprint, per esempio:
@@ -214,6 +216,33 @@ Il modo corretto per modificare una run non e' cambiare il codice, ma:
 1. duplicare una config YAML
 2. modificare label, dataset e training
 3. rilanciare `run_experiment.py`
+
+Per usare il default:
+
+```yaml
+dataset:
+  fire_image_paths:
+    - base_fire_images/fire.png
+```
+
+Per usare una sola immagine diversa:
+
+```yaml
+dataset:
+  fire_image_paths:
+    - base_fire_images/fire2.png
+```
+
+Per usare un sottoinsieme scelto da te:
+
+```yaml
+dataset:
+  fire_image_paths:
+    - base_fire_images/fire2.png
+    - base_fire_images/fire.png
+```
+
+Se la lista contiene una sola immagine, viene usata solo quella. Se contiene piu' immagini, la pipeline sceglie casualmente tra quelle presenti. Se non specifichi niente, il default resta una lista con `base_fire_images/fire.png`.
 
 Questo mantiene separati:
 
