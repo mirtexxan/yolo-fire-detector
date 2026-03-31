@@ -1,6 +1,7 @@
 # YOLO Fire Detector
 
 Repository per generare dataset sintetici di fuoco, addestrare YOLOv8 con config YAML e usare il modello finale in inferenza locale o cloud.
+Autore: Mirto Musci
 
 ## Uso rapido
 
