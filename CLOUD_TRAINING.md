@@ -1,10 +1,28 @@
 # Cloud Training Guide
 
-Guida operativa breve per usare `cloud_train.ipynb` con gli output attuali del progetto.
+Guida operativa verificata contro il codice attuale del repository e contro `cloud_train.ipynb`.
+
+## Obiettivo pratico
+
+Se vuoi il flusso piu' semplice e consigliato:
+
+1. prepara lo zip cloud in locale
+2. carica `dist/yolo-fire-detector-cloud.zip` su Colab o Drive
+3. apri `cloud_train.ipynb`
+4. imposta `USE_READY_CONFIG_AS_IS = True`
+5. imposta `READY_CONFIG_NAME = 'cloud.balanced-mini-fires.yaml'`
+6. esegui tutte le celle in ordine
+
+Questo preset usa i due asset trasparenti:
+
+- `base_fire_images/fire1-mini_nobg.png`
+- `base_fire_images/fire2-mini_nobg.png`
+
+ed e' pensato come compromesso tra tempo di training, costo GPU e qualita' finale.
 
 ## Passo 1: prepara il bundle in locale
 
-Da VS Code locale:
+Dal terminale aperto nella root del repository:
 
 ```bash
 python tools/cloud/prepare_cloud_bundle.py
@@ -18,67 +36,76 @@ dist/yolo-fire-detector-cloud.zip
 
 Questo e' il nome che il notebook cerca automaticamente.
 
-## Passo 2: carica lo zip dove ti e' piu' comodo
+## Passo 2: carica lo zip
 
 Puoi mettere `yolo-fire-detector-cloud.zip` in uno di questi posti:
 
 - `/content`
 - Google Drive
 
-Non serve piu' spostarlo a mano nella cartella persistente finale.
+Non serve copiare a mano file dentro la cartella persistente finale: ci pensa il notebook.
 
-## Passo 3: apri `cloud_train.ipynb`
+## Passo 3: apri il notebook cloud
 
-In Colab:
+Apri `cloud_train.ipynb` in Colab e fai subito queste due cose:
 
-1. apri il notebook
-2. abilita la GPU in Runtime -> Change runtime type
-3. esegui le celle in ordine
+1. `Runtime -> Change runtime type`
+2. seleziona `GPU`
 
-## Passo 4: lascia lavorare il notebook
+Poi esegui le celle dall'alto verso il basso, senza saltarne una a meta' la prima volta.
 
-Le prime celle fanno automaticamente questo:
+## Passo 4: cosa fanno le prime celle
 
-1. montano Drive se sei in Colab
-2. creano la root persistente se non esiste
-3. cercano `yolo-fire-detector-cloud.zip` nel contesto locale e in Drive
-4. spostano lo zip in:
+Le celle iniziali del notebook fanno automaticamente questo:
 
-```text
-<PERSISTENT_ROOT>/inputs/
-```
+1. montano Google Drive se l'ambiente e' Colab
+2. definiscono la root persistente, di default `/content/drive/MyDrive/yolo-fire-detector`
+3. cercano `yolo-fire-detector-cloud.zip`
+4. copiano lo zip in `<PERSISTENT_ROOT>/inputs/`
+5. estraggono il repository in `<PERSISTENT_ROOT>/repo/`
 
-5. estraggono il repository in:
-
-```text
-<PERSISTENT_ROOT>/repo/
-```
-
-Quindi non devi fare file management manuale.
+Quindi il file management manuale serve solo per caricare lo zip all'inizio.
 
 ## Passo 5: scegli la config runtime
 
-Nel notebook hai due modalita'.
+Il notebook costruisce sempre una config finale in:
 
-### Modalita' A: usa una config gia' pronta senza toccare i parametri
+```text
+repo/configs/cloud.runtime.yaml
+```
 
-Imposta:
+Hai due modalita'.
 
-- `USE_READY_CONFIG_AS_IS = True`
-- `READY_CONFIG_NAME = 'cloud.recall.yaml'`
+### Modalita' A: usa un preset pronto senza modificarlo a mano
 
-In questo caso il notebook prende quella config cosi' com'e' e cambia solo `project.persistent_root`.
+Usa questa modalita' se sei studente e vuoi partire senza complicarti il flusso.
 
-### Modalita' B: parti da un preset e poi sovrascrivi i campi principali
+Imposta nella cella di configurazione:
 
-Imposta:
+```python
+USE_READY_CONFIG_AS_IS = True
+READY_CONFIG_NAME = 'cloud.balanced-mini-fires.yaml'
+```
 
-- `USE_READY_CONFIG_AS_IS = False`
-- `BASE_CONFIG_NAME = 'cloud.default.yaml'`
+Effetto reale:
 
-e poi eventualmente modifichi:
+- il notebook legge `configs/cloud.balanced-mini-fires.yaml`
+- aggiorna solo `project.persistent_root`
+- salva il risultato come `configs/cloud.runtime.yaml`
 
-- `BASE_CONFIG_NAME`
+### Modalita' B: parti da una base e cambi i parametri principali
+
+Usa questa modalita' se vuoi fare esperimenti mantenendo una base ragionevole.
+
+Imposta per esempio:
+
+```python
+USE_READY_CONFIG_AS_IS = False
+BASE_CONFIG_NAME = 'cloud.balanced-mini-fires.yaml'
+```
+
+Poi modifica i campi esposti nella cella, tipicamente:
+
 - `DATASET_LABEL`
 - `TRAINING_LABEL`
 - `NUM_IMAGES`
@@ -88,126 +115,133 @@ e poi eventualmente modifichi:
 - `MODEL_SIZE`
 - `DEVICE`
 
-Il notebook genera poi:
-
-```text
-repo/configs/cloud.runtime.yaml
-```
+Se ti serve una modifica piu' fine, usa `MANUAL_CONFIG_PATCH` nella cella successiva.
 
 ## Passo 6: lancia il training
 
-La cella finale esegue:
+La cella finale del notebook esegue:
 
 ```bash
 python run_experiment.py --config configs/cloud.runtime.yaml
 ```
 
-Non devi lanciare `generator.py` o `train.py` separatamente.
+Non devi lanciare separatamente `generator.py` o `train.py`.
 
-## Dove finiscono gli output
+## Dove finiscono davvero gli output
 
-In Colab, di default, tutto finisce sotto:
+La pipeline scrive sotto `project.persistent_root`, che in cloud di default e':
 
 ```text
 /content/drive/MyDrive/yolo-fire-detector
 ```
 
-### `datasets/`
+### Dataset
 
-Ogni dataset sta in:
+Percorso:
 
 ```text
 datasets/<dataset-label>-<fingerprint>/
 ```
 
-Dentro trovi:
+File importanti:
 
-- `yolo_dataset.yaml`
 - `dataset_manifest.yaml`
-- `images/`
-- `labels/`
+- `yolo_dataset.yaml`
+- `images/train/`
+- `images/val/`
+- `labels/train/`
+- `labels/val/`
 
-### `runs/`
+### Run di training
 
-Ogni run sta in:
+Percorso:
 
 ```text
 runs/<run_label>/
 ```
 
-Dentro trovi almeno:
+File importanti:
 
 - `resolved_config.yaml`
-- `pipeline_summary.yaml`
 - `training_run.yaml`
-- metriche e diagnostica YOLO
+- `pipeline_summary.yaml`
+- eventuali file YOLO di diagnostica
 
-Durante il training possono esserci i checkpoint in `weights/`.
-Quando la run si chiude con successo, i checkpoint di resume vengono rimossi automaticamente.
+Durante il training possono esserci anche `weights/best.pt` e `weights/last.pt`.
+Se la run si chiude correttamente, i checkpoint pesanti vengono ripuliti dalla pipeline.
 
-### `exports/`
+### Export finali per inferenza
 
-Qui trovi quello che serve per l'inferenza finale:
+Percorso:
+
+```text
+exports/
+```
+
+File importanti:
 
 - `exports/<run_label>.pt`
 - `exports/<run_label>.yaml`
 - `exports/latest.yaml`
 
-`latest.yaml` punta all'export corrente.
+`detect.py` usa proprio `exports/latest.yaml` per trovare il modello di default.
 
-## Come salvare gli export sul PC locale
+## Come riportare il modello dal cloud al PC locale
 
-L'ultima cella del notebook:
+Il modo piu' semplice e' scaricare almeno questi file dalla cartella `exports/`:
 
-1. legge `exports/latest.yaml`
-2. comprime tutta la cartella `exports/` in:
+- `latest.yaml`
+- il file `.pt` indicato dentro `latest.yaml`
+- opzionalmente il metadata `.yaml` della stessa run
+
+Se vuoi usare il detector locale senza cambiare codice, la struttura piu' comoda sul PC e':
 
 ```text
-<PERSISTENT_ROOT>/downloads/yolo-fire-detector-exports.zip
+artifacts/local/exports/
 ```
 
-3. stampa il comando Colab per scaricare quello zip sul PC locale
+con dentro i file esportati dal cloud.
 
-Quello zip e' pensato per essere portato poi in locale e usato con `detect.py`.
+## Resume e riuso dataset
 
-## Cosa succede se riapri una sessione
-
-Il flusso corretto e' semplicemente rieseguire il notebook.
+Se riapri una sessione Colab, il flusso corretto e' rieseguire il notebook.
 
 La pipeline gestisce automaticamente:
 
 - riuso del dataset se il fingerprint coincide
-- resume del training se la run e' compatibile e c'e' un checkpoint valido
+- resume del training se la run e' compatibile e `weights/last.pt` esiste ancora
 
 ## Troubleshooting minimo
 
 ### Il notebook non trova lo zip
 
-Metti `yolo-fire-detector-cloud.zip` in uno di questi posti e riesegui la cella di sync:
+Metti `yolo-fire-detector-cloud.zip` in:
 
 - `/content`
-- Google Drive
+- oppure Google Drive
 
-### Vuoi forzare l'aggiornamento del codice estratto
+Poi riesegui la cella di sync.
 
-Nella cella di sync imposta:
+### Vuoi forzare l'aggiornamento del repository estratto
+
+Imposta:
 
 ```python
 FORCE_PROJECT_REFRESH = True
 ```
 
-### Vuoi rigenerare il dataset
+### Vuoi rigenerare il dataset anche se esiste gia'
 
-Nella config runtime imposta:
+In `cloud.runtime.yaml` o in `MANUAL_CONFIG_PATCH`:
 
 ```yaml
 dataset:
   force_regenerate: true
 ```
 
-### Vuoi evitare il resume
+### Vuoi evitare il resume del training
 
-Nella config runtime imposta:
+In `cloud.runtime.yaml` o in `MANUAL_CONFIG_PATCH`:
 
 ```yaml
 training:
@@ -216,10 +250,12 @@ training:
 
 ## Checklist finale
 
-1. `python tools/cloud/prepare_cloud_bundle.py`
-2. carichi `dist/yolo-fire-detector-cloud.zip`
-3. apri `cloud_train.ipynb`
-4. scegli `USE_READY_CONFIG_AS_IS = True` se vuoi lanciare una config pronta senza modifiche manuali
-5. esegui le celle in ordine
-6. trovi i risultati in `datasets/`, `runs/`, `exports/`
-7. scarichi `downloads/yolo-fire-detector-exports.zip` sul PC locale
+1. esegui `python tools/cloud/prepare_cloud_bundle.py`
+2. verifica che esista `dist/yolo-fire-detector-cloud.zip`
+3. carica lo zip su Colab o Drive
+4. apri `cloud_train.ipynb`
+5. imposta `USE_READY_CONFIG_AS_IS = True`
+6. imposta `READY_CONFIG_NAME = 'cloud.balanced-mini-fires.yaml'`
+7. esegui le celle in ordine
+8. controlla i risultati sotto `datasets/`, `runs/` ed `exports/`
+9. copia in locale gli export che ti servono per `detect.py`

@@ -6,6 +6,9 @@ Tutti i file sono in `configs/` e vengono inclusi nello zip cloud automaticament
 
 ## Preset disponibili
 
+- `configs/cloud.balanced-mini-fires.yaml`
+  Preset consigliato come compromesso tra costo, tempo e qualita'. Usa i due asset trasparenti `fire1-mini_nobg.png` e `fire2-mini_nobg.png`, dataset medio e YOLOv8n per restare leggero anche in inferenza locale.
+
 - `configs/cloud.default.yaml`
   Baseline attuale. Punto di confronto stabile.
 
@@ -32,6 +35,13 @@ Tutti i file sono in `configs/` e vengono inclusi nello zip cloud automaticament
 
 ## Strategia consigliata
 
+Se vuoi una sola scelta pragmatica da dare a uno studente, parti da:
+
+1. `configs/cloud.balanced-mini-fires.yaml`
+2. `configs/cloud.recall.yaml` se perde troppi positivi
+3. `configs/cloud.hard-negatives.yaml` se compaiono troppi falsi positivi
+4. `configs/cloud.capacity.yaml` solo se hai budget GPU e vuoi alzare la qualita'
+
 Se il problema e' che il modello vede il fuoco ma con confidenza troppo bassa, l'ordine sensato e':
 
 1. `configs/cloud.recall.yaml`
@@ -46,7 +56,15 @@ Se il problema e' che il modello vede il fuoco ma con confidenza troppo bassa, l
 Nel notebook `cloud_train.ipynb` puoi cambiare una sola variabile:
 
 ```python
-BASE_CONFIG_NAME = 'cloud.recall.yaml'
+READY_CONFIG_NAME = 'cloud.balanced-mini-fires.yaml'
 ```
 
-Il notebook costruira' poi `configs/cloud.runtime.yaml` partendo da quel preset.
+Se `USE_READY_CONFIG_AS_IS = True`, il notebook copiera' quel preset in `configs/cloud.runtime.yaml` cambiando solo `project.persistent_root`.
+
+Se invece `USE_READY_CONFIG_AS_IS = False`, puoi usare:
+
+```python
+BASE_CONFIG_NAME = 'cloud.balanced-mini-fires.yaml'
+```
+
+e poi sovrascrivere i parametri principali dalla cella di runtime.
