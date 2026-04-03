@@ -1,7 +1,5 @@
 project:
-  environment: cloud
   label: fast-debug
-  persistent_root: /content/drive/MyDrive/yolo-fire-detector
 
 dataset:
   label: synthetic-fire-fast-debug
@@ -18,7 +16,6 @@ training:
   label: yolov8n-fast-debug
   model_size: n
   weights: yolov8n.pt
-  device: "0"
   epochs: 8
   batch_size: 16
   image_size: 512

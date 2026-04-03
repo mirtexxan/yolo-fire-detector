@@ -1,0 +1,8 @@
+schema_version: 2
+saved_at: '2026-04-02T17:44:27.877670+00:00'
+source_config: presets/fast-debug.yaml
+runtime_config: runtime/local-cpu.yaml
+saved_config: generated/fast-debug--local-cpu.yaml
+latest_config: generated/latest.local.yaml
+latest_kind: local
+app_version: 2026.04.02.4

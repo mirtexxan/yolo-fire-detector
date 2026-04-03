@@ -1,16 +1,10 @@
 project:
-  environment: local
   label: smoke-test
-  persistent_root: artifacts/local
 
 dataset:
   label: smoke-dataset
   fire_image_paths:
     - base_fire_images/fire.png
-  # In alternativa puoi specificare esplicitamente un sottoinsieme:
-  # fire_image_paths:
-  #   - base_fire_images/fire2.png
-  #   - base_fire_images/fire.png
   num_images: 12
   image_size: 320
   negative_ratio: 0.35

@@ -1,17 +1,11 @@
 project:
-  environment: local
-  label: baseline-local
-  persistent_root: artifacts/local
+  label: baseline
 
 dataset:
-  label: synthetic-fire-default
+  label: synthetic-fire
   fire_image_paths:
     - base_fire_images/fire.png
-  # Per usare un sottoinsieme scelto da te, sostituisci con:
-  # fire_image_paths:
-  #   - base_fire_images/fire2.png
-  #   - base_fire_images/fire.png
-  num_images: 100
+  num_images: 2000
   image_size: 640
   negative_ratio: 0.35
   train_split: 0.8
@@ -19,11 +13,10 @@ dataset:
   force_regenerate: false
 
 training:
-  label: yolov8n-local
+  label: yolov8n-baseline
   model_size: n
   weights: yolov8n.pt
-  device: cpu
-  epochs: 10
+  epochs: 50
   batch_size: 16
   image_size: 640
   resume: auto

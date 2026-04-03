@@ -1,13 +1,94 @@
 """Training utilities for the YOLO Fire Detector project."""
 
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import yaml
+import torch
 
 from ultralytics import YOLO
 
 from settings import DatasetGenerationSettings, TrainingSettings
+
+
+def _normalize_device(device: str | int | None) -> str:
+    """Return a normalized training device token."""
+    if device is None:
+        return "cpu"
+    normalized = str(device).strip()
+    return normalized or "cpu"
+
+
+def _device_requests_cuda(device: str) -> bool:
+    """Check whether a device token expects CUDA-capable hardware."""
+    lowered = device.lower()
+    if lowered in {"cpu", "mps"}:
+        return False
+    if lowered.startswith("cuda"):
+        return True
+    if lowered == "auto":
+        return True
+    return any(char.isdigit() for char in lowered)
+
+
+def _probe_nvidia_smi() -> tuple[bool, str]:
+    """Probe nvidia-smi for diagnostics without failing the training pipeline."""
+    nvidia_smi = shutil.which("nvidia-smi")
+    if not nvidia_smi:
+        return False, "nvidia-smi non disponibile nel PATH"
+
+    try:
+        probe = subprocess.run(
+            [nvidia_smi, "--query-gpu=name,driver_version", "--format=csv,noheader"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        return False, f"nvidia-smi non eseguibile: {exc}"
+
+    output = (probe.stdout or "").strip() or (probe.stderr or "").strip()
+    if probe.returncode != 0:
+        return False, f"nvidia-smi ha restituito codice {probe.returncode}: {output or 'nessun output'}"
+
+    return True, output or "nvidia-smi eseguito correttamente"
+
+
+def enforce_training_device(device: str | int | None, *, require_gpu: bool) -> str:
+    """Validate runtime device policy and prevent silent CPU fallback when GPU is required."""
+    normalized = _normalize_device(device)
+    cuda_requested = _device_requests_cuda(normalized)
+
+    cuda_ready = torch.cuda.is_available()
+    cuda_count = torch.cuda.device_count()
+    smi_ok, smi_details = _probe_nvidia_smi()
+
+    if require_gpu:
+        if not cuda_requested:
+            raise RuntimeError(
+                "Policy GPU obbligatoria attiva ma training.device non richiede CUDA "
+                f"(valore ricevuto: '{normalized}'). Imposta training.device a '0' o 'cuda:0'."
+            )
+        if not cuda_ready or cuda_count < 1:
+            raise RuntimeError(
+                "Policy GPU obbligatoria attiva ma CUDA non e' disponibile in PyTorch. "
+                "Fallback a CPU bloccato intenzionalmente.\n"
+                f"- torch.cuda.is_available() = {cuda_ready}\n"
+                f"- torch.cuda.device_count() = {cuda_count}\n"
+                f"- nvidia-smi ok = {smi_ok}\n"
+                f"- nvidia-smi details = {smi_details}\n"
+                "Verifica runtime GPU (es. Colab: Runtime -> Change runtime type -> GPU) e riavvia il kernel."
+            )
+
+    if cuda_requested and (not cuda_ready or cuda_count < 1):
+        print(
+            "⚠️ CUDA richiesta ma non disponibile: Ultralytics potrebbe degradare a CPU. "
+            "Per bloccare questo comportamento imposta training.require_gpu=true."
+        )
+
+    return normalized
 
 
 def portable_path(path: str | Path, root: str | Path | None = None) -> str:
@@ -48,14 +129,14 @@ def validate_dataset(dataset_root: str) -> None:
     if not os.path.exists(dataset_root):
         raise FileNotFoundError(
             f"Dataset non trovato in {dataset_root}\n"
-            "Esegui prima: python run_experiment.py --config configs/local.default.yaml"
+            "Esegui prima: python run_experiment.py --config configs/presets/default.yaml"
         )
 
     images_train = os.path.join(dataset_root, "images", "train")
     if not os.path.exists(images_train) or not os.listdir(images_train):
         raise FileNotFoundError(
             f"Nessuna immagine di training trovata in {images_train}\n"
-            "Esegui prima: python run_experiment.py --config configs/local.default.yaml"
+            "Esegui prima: python run_experiment.py --config configs/presets/default.yaml"
         )
 
 
@@ -78,6 +159,7 @@ def train_model(
     batch_size: int = TrainingSettings.BATCH_SIZE,
     image_size: int = TrainingSettings.IMAGE_SIZE,
     device: str = TrainingSettings.DEVICE,
+    require_gpu: bool = False,
     resume: bool = False,
     dataset_root: str = DatasetGenerationSettings.DATASET_ROOT,
     project_name: str = TrainingSettings.PROJECT_NAME,
@@ -99,6 +181,10 @@ def train_model(
     print(f"Dataset: {dataset_root}")
     print(f"Weights iniziali: {base_weights}")
     print(f"Output run: {run_dir}")
+    effective_device = enforce_training_device(device, require_gpu=require_gpu)
+    print(f"Device richiesto: {device}")
+    print(f"Device effettivo: {effective_device}")
+    print(f"GPU obbligatoria: {require_gpu}")
 
     if resume and os.path.exists(checkpoint_path):
         print(f"🔁 Resume da checkpoint: {checkpoint_path}")
@@ -115,7 +201,7 @@ def train_model(
             imgsz=image_size,
             batch=batch_size,
             patience=TrainingSettings.PATIENCE,
-            device=device,
+            device=effective_device,
             project=project_name,
             name=experiment_name,
             exist_ok=TrainingSettings.OVERWRITE_EXISTING,
@@ -147,7 +233,8 @@ def train_model(
         "epochs": epochs,
         "batch_size": batch_size,
         "image_size": image_size,
-        "device": device,
+        "device": effective_device,
+        "require_gpu": require_gpu,
         "resume": resume,
     }
     if extra_summary:

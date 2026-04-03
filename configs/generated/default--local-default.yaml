@@ -1,41 +1,36 @@
 project:
-  environment: cloud
-  label: quick-screen
-  persistent_root: /content/drive/MyDrive/yolo-fire-detector
-
+  label: baseline
+  persistent_root: artifacts/local
 dataset:
-  label: synthetic-fire-quick-screen
+  label: synthetic-fire
   fire_image_paths:
-    - base_fire_images/fire.png
-  num_images: 1200
+  - base_fire_images/fire.png
+  num_images: 2000
   image_size: 640
   negative_ratio: 0.35
   train_split: 0.8
   seed: 42
   force_regenerate: false
-
 training:
-  label: yolov8n-quick-screen
+  label: yolov8n-baseline
   model_size: n
   weights: yolov8n.pt
-  device: "0"
-  epochs: 25
+  epochs: 50
   batch_size: 16
   image_size: 640
   resume: auto
-
+  device: cpu
+  require_gpu: false
 dataset_settings_overrides:
   fire_scale_min: 0.05
   fire_scale_max: 0.5
-
 image_transform_overrides:
   rotation_deg_min: -180
   rotation_deg_max: 180
   perspective_shift: 120
   augment_negative_backgrounds: true
-
 training_overrides:
-  patience: 8
+  patience: 10
   learning_rate_init: 0.01
   learning_rate_final: 0.01
   momentum: 0.937

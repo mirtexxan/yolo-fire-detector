@@ -1,127 +1,156 @@
 # YOLO Fire Detector
 
-Repository per generare dataset sintetici di fuoco, addestrare YOLOv8 tramite file YAML e usare il modello finale in inferenza locale o cloud.
+YOLO Fire Detector e' un progetto per creare dataset sintetici di immagini con fuoco, addestrare un modello YOLOv8 in locale o in cloud e usare il modello finale in inferenza (detect) con diversi tipi di fonti (webcam, video, cartella immagini, stream)
 
-Autore: Mirto Musci
-
-## Cosa fa il progetto
-
-La pipeline completa e' questa:
-
-1. prende una o piu' immagini base del fuoco con alpha
-2. genera un dataset sintetico YOLO in `datasets/`
-3. allena un modello YOLOv8 in `runs/`
-4. registra l'export finale in `exports/`
-5. permette di usare quel modello con `detect.py`
-
-L'entrypoint corretto per training e generazione non e' `generator.py` o `train.py` separatamente, ma:
+L'entrypoint principale per generazione dataset, training ed export e' sempre:
 
 ```bash
 python run_experiment.py --config <config.yaml>
 ```
 
-## Avvio rapido per studenti
+Non e' necessario eseguire separatamente `generator.py` o `train.py` per il flusso standard.
 
-Se vuoi solo capire come usare il progetto senza perderti:
+## Prima di tutto: il percorso piu' semplice
 
-### Uso locale minimo
+Se stai aprendo il progetto per la prima volta, il percorso consigliato e' questo:
+
+1. installa le dipendenze Python
+2. esegui uno smoke test locale
+3. avvia il detector con l'ultimo modello disponibile
+4. se vuoi usare il cloud, crea il bundle e apri il notebook
+
+Comandi minimi:
 
 ```bash
 pip install -r requirements.txt
-python run_experiment.py --config configs/local.smoke.yaml
+python run_experiment.py --config configs/presets/smoke.yaml
 python detect.py --source webcam
 ```
 
-### Uso cloud consigliato
+Per il flusso cloud:
 
 ```bash
+python tools/cloud/cloud_configurator.py
 python tools/cloud/prepare_cloud_bundle.py
 ```
 
-Poi apri `cloud_train.ipynb` in Colab e usa:
+Poi apri `cloud_train.ipynb` in Google Colab, seleziona subito un runtime GPU, carica `yolo-fire-detector-cloud.zip` e segui le celle in ordine.
 
-```python
-USE_READY_CONFIG_AS_IS = True
-READY_CONFIG_NAME = 'cloud.balanced-mini-fires.yaml'
+## Cosa produce il progetto
+
+Una esecuzione completa della pipeline fa queste operazioni:
+
+1. legge una configurazione YAML
+2. genera oppure riusa un dataset YOLO sotto una cartella persistente
+3. addestra un modello YOLOv8
+4. esporta il modello finale in formato `.pt`
+5. aggiorna un puntatore `latest.yaml` per il riuso in `detect.py`
+
+Gli output locali, per impostazione predefinita, finiscono sotto `artifacts/local/`.
+
+## Requisiti minimi
+
+Prima di eseguire il progetto, verifica questi punti:
+
+1. il terminale deve essere aperto nella root del repository
+2. Python deve essere disponibile nel sistema
+3. il file `requirements.txt` deve essere installato
+4. il file `yolov8n.pt` deve essere presente nella root del progetto
+
+Esempio con ambiente virtuale:
+
+```bash
+python -m venv .venv
 ```
 
-## Prerequisiti locali
+Windows PowerShell:
 
-### 1. Apri il terminale nella root del progetto
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
 
-Devi trovarti nella cartella che contiene file come:
+macOS o Linux:
 
-- `run_experiment.py`
-- `detect.py`
-- `requirements.txt`
-- `configs/`
+```bash
+source .venv/bin/activate
+```
 
-### 2. Installa le dipendenze Python
+Installazione dipendenze:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Il progetto usa `opencv-python`, non `opencv-python-headless`.
+## Struttura pratica del repository
 
-### 3. Verifica che il peso base esista
+Queste sono le cartelle e i file che conviene conoscere subito:
 
-Nella root del repository deve esserci:
+- `run_experiment.py`: pipeline completa per dataset, training ed export
+- `detect.py`: inferenza locale da webcam, cartella immagini, video o stream RTSP/RTMP
+- `cloud_train.ipynb`: notebook cloud per Google Colab
+- `configs/`: configurazioni YAML
+- `base_fire_images/`: immagini di fuoco usate dal generatore sintetico
+- `artifacts/`: output persistenti locali, cloud o importati
+- `tools/`: utility aggiuntive, compreso configuratore cloud e model registry
 
-```text
-yolov8n.pt
-```
+## Come funzionano le configurazioni
 
-Serve come base per i preset che usano modello `n`.
+Le configurazioni si trovano in `configs/` e sono organizzate in tre gruppi:
 
-## Come usare il progetto in locale
+- `configs/presets/`: preset di esperimento pronti all'uso
+- `configs/runtime/`: override per l'ambiente di esecuzione
+- `configs/generated/`: configurazioni finali generate dal configuratore
 
-## Flusso locale corretto
+I due file piu' importanti generati automaticamente sono:
 
-Il flusso locale standard e' questo:
+- `configs/generated/latest.local.yaml`: configurazione locale piu' recente
+- `configs/generated/latest.cloud.yaml`: configurazione cloud piu' recente
 
-1. esegui una config YAML con `run_experiment.py`
-2. lascia che la pipeline generi dataset, training ed export
-3. verifica i file creati in `artifacts/local/`
-4. usa `detect.py` sul modello appena esportato
+La GUI `tools/cloud/cloud_configurator.py` parte da un preset, applica un runtime override obbligatorio e salva una configurazione finale in `configs/generated/`.
 
-## Passo 1: smoke test end-to-end
+## Primo uso in locale
 
-Se vuoi verificare che tutto funzioni prima di una run vera:
+### 1. Esegui uno smoke test
 
-```bash
-python run_experiment.py --config configs/local.smoke.yaml
-```
-
-Questa run fa un controllo completo ma piccolo:
-
-- genera un dataset ridotto
-- allena 1 epoca
-- scrive i metadata di run
-- crea l'export finale
-- aggiorna `artifacts/local/exports/latest.yaml`
-
-## Passo 2: run locale normale
-
-Per una run locale standard:
+Il test piu' semplice per verificare che il progetto funzioni e' questo:
 
 ```bash
-python run_experiment.py --config configs/local.default.yaml
+python run_experiment.py --config configs/presets/smoke.yaml
 ```
 
-Questa config usa per default:
+Questo comando esegue una run ridotta utile per controllare che generazione, training ed export siano operativi.
 
-- ambiente `local`
-- output in `artifacts/local`
-- dataset sintetico da 100 immagini
-- YOLOv8n
-- training su CPU
+### 2. Esegui una run locale standard
 
-Se vuoi piu' velocita' e hai CUDA, cambia `training.device` nella config in `0`.
+Per una prova locale piu' realistica:
 
-## Passo 3: controlla gli output
+```bash
+python run_experiment.py --config configs/presets/baseline-lite.yaml
+```
 
-Dopo una run riuscita, la struttura importante e' questa:
+Se preferisci preparare una configurazione guidata con interfaccia grafica:
+
+```bash
+python tools/cloud/cloud_configurator.py
+```
+
+Dopo il salvataggio, puoi eseguire la configurazione finale generata con:
+
+```bash
+python run_experiment.py --config configs/generated/latest.local.yaml
+```
+
+### 3. Esegui solo la generazione dataset
+
+Se vuoi fermarti prima del training:
+
+```bash
+python run_experiment.py --config configs/generated/latest.local.yaml --skip-training
+```
+
+## Dove trovare gli output locali
+
+Dopo una run locale completata, la struttura piu' importante e' questa:
 
 ```text
 artifacts/local/
@@ -130,15 +159,15 @@ artifacts/local/
   exports/
 ```
 
-### Dataset locale
+### Dataset
 
-Percorso:
+Percorso tipico:
 
 ```text
 artifacts/local/datasets/<dataset-label>-<fingerprint>/
 ```
 
-File importanti:
+File principali:
 
 - `dataset_manifest.yaml`
 - `yolo_dataset.yaml`
@@ -147,21 +176,21 @@ File importanti:
 - `labels/train/`
 - `labels/val/`
 
-### Run locale
+### Run di training
 
-Percorso:
+Percorso tipico:
 
 ```text
-artifacts/local/runs/<run_label>/
+artifacts/local/runs/<run-label>/
 ```
 
-File importanti:
+File principali:
 
 - `resolved_config.yaml`
 - `training_run.yaml`
 - `pipeline_summary.yaml`
 
-### Export locale
+### Export del modello
 
 Percorso:
 
@@ -169,31 +198,17 @@ Percorso:
 artifacts/local/exports/
 ```
 
-File importanti:
+File principali:
 
-- `<run_label>.pt`
-- `<run_label>.yaml`
+- `<run-label>.pt`
+- `<run-label>.yaml`
 - `latest.yaml`
 
-`latest.yaml` e' il puntatore che `detect.py` usa automaticamente quando non passi `--weights`.
+`latest.yaml` permette a `detect.py` di trovare automaticamente il modello piu' recente.
 
-## Passo 4: avvia il detector
+## Come usare detect.py
 
-Per usare l'ultimo export locale:
-
-```bash
-python detect.py --source webcam
-```
-
-Per usare un peso specifico:
-
-```bash
-python detect.py --weights artifacts/local/exports/<run_label>.pt --source webcam
-```
-
-## Come usare `detect.py`
-
-`detect.py` supporta piu' sorgenti.
+`detect.py` usa di default il modello piu' recente disponibile. Se non passi `--weights`, il valore usato e' equivalente a `latest`.
 
 ### Webcam con selezione guidata
 
@@ -202,14 +217,9 @@ python detect.py
 python detect.py --source webcam
 ```
 
-Comportamento:
+Questa modalita' cerca le webcam disponibili e permette di scegliere quella corretta.
 
-- scansiona le webcam disponibili
-- mostra gli ID trovati
-- evidenzia le camere che restituiscono un frame valido
-- chiede quale aprire
-
-### Webcam diretta per ID
+### Webcam con indice esplicito
 
 ```bash
 python detect.py --source 0
@@ -222,156 +232,119 @@ python detect.py --source 1
 python detect.py --source path/to/images
 ```
 
-### Video locale
+### File video
 
 ```bash
 python detect.py --source video.mp4
 ```
 
-### Stream RTMP o RTSP
+### Stream RTSP o RTMP
 
 ```bash
-python detect.py --source rtmp://server/app/stream
 python detect.py --source rtsp://server/stream
+python detect.py --source rtmp://server/app/stream
 ```
 
-## Parametri utili di `detect.py`
-
-### Confidenza
+### Modello esplicito
 
 ```bash
-python detect.py --source webcam --conf 0.3
-python detect.py --source webcam --conf 0.7
+python detect.py --source webcam --weights artifacts/local/exports/<run-label>.pt
 ```
 
-Interpretazione pratica:
+### Parametri piu' utili
 
-- `0.3`: piu' sensibile, ma aumenta i falsi positivi
-- `0.5`: buon punto di partenza
-- `0.7`: piu' severo, ma rischia di perdere fuochi deboli
+Confidenza:
 
-### Device
+```bash
+python detect.py --source webcam --conf 0.5
+```
+
+Device:
 
 ```bash
 python detect.py --source webcam --device cpu
 python detect.py --source webcam --device 0
 ```
 
-Interpretazione pratica:
+Valori pratici:
 
-- `cpu`: usa il processore
-- `0`: usa la GPU CUDA 0
+- `--conf 0.5`: punto di partenza consigliato
+- `--conf 0.3`: piu' sensibile, ma con maggiore rischio di falsi positivi
+- `--conf 0.7`: piu' severo, ma puo' perdere fuochi deboli
+- `--device cpu`: usa il processore
+- `--device 0`: usa la GPU CUDA 0
 
-## Tasti durante l'inferenza
+### Tasti durante l'inferenza
 
-Per webcam, video e stream:
+Per webcam, stream e video:
 
-- `q` o `Esc`: esce
+- `q` o `Esc`: chiude la sessione
 - `s`: salva il frame corrente in `detections/`
 
-Per cartella immagini:
+Per cartelle di immagini:
 
 - `a` o freccia sinistra: immagine precedente
 - `d` o freccia destra: immagine successiva
 - `s`: salva l'immagine annotata
-- `q` o `Esc`: esce
+- `q` o `Esc`: chiude la sessione
 
-## Come cambiare le immagini base del fuoco
+## Come scegliere il preset iniziale
 
-Le immagini base si impostano nella chiave YAML `dataset.fire_image_paths`.
-
-Esempio con i due asset mini trasparenti:
-
-```yaml
-dataset:
-  fire_image_paths:
-    - base_fire_images/fire1-mini_nobg.png
-    - base_fire_images/fire2-mini_nobg.png
-```
-
-Se la lista contiene piu' immagini, la generazione sceglie casualmente tra quelle specificate.
-
-## Config YAML principali
-
-Le configurazioni stanno in `configs/`.
-
-### Locali
-
-- `configs/local.smoke.yaml`: test end-to-end rapido
-- `configs/local.default.yaml`: baseline locale semplice
-- `configs/local.piazzola-light.yaml`: variante locale dedicata allo scenario piazzola/light
-
-### Cloud
-
-- `configs/cloud.balanced-mini-fires.yaml`: preset consigliato per studenti, usa `fire1-mini_nobg` e `fire2-mini_nobg`
-- `configs/cloud.default.yaml`: baseline cloud semplice
-- `configs/cloud.quick-screen.yaml`: run rapida per scremare idee
-- `configs/cloud.recall.yaml`: spinge la recall
-- `configs/cloud.robust.yaml`: spinge la robustezza
-- `configs/cloud.small-fire.yaml`: ottimizzato per fuochi piccoli
-- `configs/cloud.hard-negatives.yaml`: utile contro i falsi positivi
-- `configs/cloud.capacity.yaml`: piu' costoso, punta alla massima capacita'
-- `configs/cloud.fast-debug.yaml`: debug veloce della pipeline
-
-## Preset cloud consigliato
-
-Il preset consigliato per partire e':
+Per la maggior parte dei casi, il preset piu' semplice da cui partire e':
 
 ```text
-configs/cloud.balanced-mini-fires.yaml
+configs/presets/balanced-mini-fires.yaml
 ```
 
-Perche' e' un buon compromesso:
+Se vuoi un controllo rapido della pipeline usa invece:
 
-- usa due asset trasparenti gia' pronti
-- mantiene YOLOv8n, quindi training e inferenza restano leggeri
-- aumenta il dataset rispetto alla baseline base
-- introduce un po' piu' di variabilita' sintetica senza diventare costoso come i preset piu' pesanti
+```text
+configs/presets/smoke.yaml
+```
 
-## Come usare il progetto in cloud
+Per una panoramica completa dei preset disponibili, consulta `TRAINING_PRESETS.md`.
 
-Per il flusso cloud dettagliato usa [CLOUD_TRAINING.md](CLOUD_TRAINING.md).
+## Uso cloud in sintesi
 
-Sintesi operativa:
+Il flusso cloud corretto e' questo:
 
-1. esegui `python tools/cloud/prepare_cloud_bundle.py`
-2. ottieni `dist/yolo-fire-detector-cloud.zip`
-3. carica quello zip in Colab o Drive
-4. apri `cloud_train.ipynb`
-5. imposta `USE_READY_CONFIG_AS_IS = True`
-6. imposta `READY_CONFIG_NAME = 'cloud.balanced-mini-fires.yaml'`
-7. esegui le celle in ordine
+1. apri `tools/cloud/cloud_configurator.py`
+2. scegli un preset e un runtime cloud
+3. salva la configurazione finale
+4. esegui `python tools/cloud/prepare_cloud_bundle.py`
+5. carica `dist/yolo-fire-detector-cloud.zip` su Colab o Google Drive
+6. apri `cloud_train.ipynb`
+7. esegui le celle nell'ordine proposto
+
+Il notebook usa `configs/generated/latest.cloud.yaml` gia' inclusa nel bundle. Per la procedura completa, consulta `CLOUD_TRAINING.md`.
 
 ## Bundle cloud
 
-Lo script:
+Questo comando crea lo zip pronto per il notebook:
 
 ```bash
 python tools/cloud/prepare_cloud_bundle.py
 ```
 
-crea uno zip pronto per Colab in `dist/yolo-fire-detector-cloud.zip`.
+Output atteso:
 
-Il bundle include automaticamente:
-
-- file Python
-- notebook
-- file YAML
-- documentazione Markdown
-- PNG dentro `base_fire_images/`
-- pesi `.pt` in root come `yolov8n.pt`
-
-## Troubleshooting rapido
-
-### `detect.py` non trova il modello
-
-Esegui prima almeno una run completa:
-
-```bash
-python run_experiment.py --config configs/local.default.yaml
+```text
+dist/yolo-fire-detector-cloud.zip
 ```
 
-Poi controlla che esista:
+Il bundle include automaticamente codice Python, notebook, file YAML, documentazione Markdown, immagini PNG sotto `base_fire_images/` e i pesi `.pt` presenti nella root del progetto.
+
+## Troubleshooting essenziale
+
+### `detect.py` non trova un modello
+
+Esegui prima una run completa, ad esempio:
+
+```bash
+python run_experiment.py --config configs/presets/default.yaml
+```
+
+Poi verifica che esista:
 
 ```text
 artifacts/local/exports/latest.yaml
@@ -379,48 +352,39 @@ artifacts/local/exports/latest.yaml
 
 ### Vuoi rigenerare il dataset anche se esiste gia'
 
-Nella config:
+Nella configurazione YAML:
 
 ```yaml
 dataset:
   force_regenerate: true
 ```
 
-### Vuoi disabilitare il resume del training
+### Vuoi evitare il resume del training
 
-Nella config:
+Nella configurazione YAML:
 
 ```yaml
 training:
   resume: never
 ```
 
-### Vuoi usare la GPU
+### Vuoi usare la GPU per il training
 
-In training, imposta nella config:
+Nella configurazione YAML:
 
 ```yaml
 training:
   device: "0"
 ```
 
-In detect:
+### Vuoi usare la GPU per l'inferenza
 
 ```bash
 python detect.py --source webcam --device 0
 ```
 
-## File principali
+## Documenti utili
 
-- `run_experiment.py`: entrypoint corretto per dataset + training + export
-- `detect.py`: inferenza locale su webcam, immagini, video e stream
-- `cloud_train.ipynb`: notebook cloud per Colab
-- `tools/cloud/prepare_cloud_bundle.py`: crea lo zip da caricare nel cloud
-- `configs/`: preset locali e cloud
-- `base_fire_images/`: immagini base del fuoco usate dal generatore
-
-- `run_experiment.py`: pipeline generation + training
-- `detect.py`: inferenza da webcam, stream, video o immagini
-- `tools/cloud/prepare_cloud_bundle.py`: zip per Colab
-- `cloud_train.ipynb`: notebook cloud persistente
-- `TRAINING_PRESETS.md`: panoramica preset cloud
+- `CLOUD_TRAINING.md`: guida completa al flusso cloud
+- `TRAINING_PRESETS.md`: scelta ragionata dei preset
+- `tools/README.md`: utility accessorie, inclusi configuratore, dataset viewer e model registry

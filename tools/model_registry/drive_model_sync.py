@@ -18,6 +18,8 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 DEFAULT_OAUTH_CREDENTIALS_FILE = "tools/model_registry/oauth_credentials.local.json"
+ALL_RUN_LABEL_SELECTOR = "all"
+ALL_RECURSIVE_RUN_LABEL_SELECTOR = "all-r"
 
 
 def read_yaml(path: Path) -> dict[str, Any]:
@@ -49,6 +51,160 @@ def resolve_with_persistent_root(path_value: str, persistent_root: Path) -> Path
     return (persistent_root / raw).resolve()
 
 
+def resolve_local_artifact_reference(path_value: str, local_root: Path) -> Path:
+    raw = Path(path_value.strip())
+    if raw.is_absolute():
+        return raw
+
+    direct_candidate = (local_root / raw).resolve()
+    if direct_candidate.exists():
+        return direct_candidate
+
+    matches = [candidate.resolve() for candidate in local_root.rglob(raw.name) if candidate.is_file()]
+    if not matches:
+        return direct_candidate
+
+    if len(matches) == 1:
+        return matches[0]
+
+    local_matches = [candidate for candidate in matches if "local" in candidate.parts]
+    if len(local_matches) == 1:
+        return local_matches[0]
+
+    export_matches = [candidate for candidate in matches if "exports" in candidate.parts]
+    if len(export_matches) == 1:
+        return export_matches[0]
+
+    local_export_matches = [candidate for candidate in export_matches if "local" in candidate.parts]
+    if len(local_export_matches) == 1:
+        return local_export_matches[0]
+
+    ranked_matches = sorted(matches, key=lambda candidate: (candidate.stat().st_mtime, str(candidate).lower()))
+    newest_match = ranked_matches[-1]
+    newest_mtime = newest_match.stat().st_mtime
+    newest_ties = [candidate for candidate in ranked_matches if candidate.stat().st_mtime == newest_mtime]
+    if len(newest_ties) == 1:
+        return newest_match
+
+    options = "\n".join(f"- {candidate}" for candidate in matches[:12])
+    raise ValueError(
+        f"Ambiguous artifact reference '{path_value}' under {local_root}. Provide a more specific path.\n{options}"
+    )
+
+
+def resolve_optional_local_model_reference(path_value: str | None, local_root: Path) -> Path | None:
+    if not isinstance(path_value, str) or not path_value.strip():
+        return None
+
+    raw_value = path_value.strip()
+    candidates = [raw_value]
+    if not Path(raw_value).suffix:
+        candidates.append(f"{raw_value}.pt")
+
+    last_file_error: FileNotFoundError | None = None
+    for candidate in candidates:
+        try:
+            resolved = resolve_local_artifact_reference(candidate, local_root)
+        except FileNotFoundError as exc:
+            last_file_error = exc
+            continue
+        if resolved.suffix.lower() == ".pt":
+            return resolved
+
+    if last_file_error is not None:
+        return None
+    return None
+
+
+def discover_local_model_artifacts(local_root: Path, *, recursive: bool) -> list[tuple[Path, Path | None, str]]:
+    candidates: list[tuple[float, str, Path, Path | None, str]] = []
+    seen_model_paths: set[Path] = set()
+    iterator = local_root.rglob("*.pt") if recursive else local_root.glob("*.pt")
+
+    for model_path in iterator:
+        if not model_path.is_file():
+            continue
+
+        resolved_model = model_path.resolve()
+        if resolved_model in seen_model_paths:
+            continue
+
+        metadata_candidate = model_path.with_suffix(".yaml")
+        resolved_metadata = metadata_candidate.resolve() if metadata_candidate.exists() and metadata_candidate.is_file() else None
+        candidates.append(
+            (model_path.stat().st_mtime, str(resolved_model).lower(), resolved_model, resolved_metadata, model_path.stem)
+        )
+        seen_model_paths.add(resolved_model)
+
+    if not candidates:
+        scope = "recursively under" if recursive else "directly under"
+        raise FileNotFoundError(f"No .pt models found {scope}: {local_root}")
+
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    return [(model_path, metadata_path, run_label) for _, _, model_path, metadata_path, run_label in candidates]
+
+
+def select_local_artifacts_by_prefix(selector: str, local_root: Path) -> list[tuple[Path, Path | None, str]]:
+    normalized = selector.strip().lower()
+    if not normalized:
+        return []
+
+    prefixes = {normalized}
+    if normalized.endswith(".pt"):
+        prefixes.add(normalized[:-3])
+    else:
+        prefixes.add(f"{normalized}.pt")
+
+    matches: list[tuple[Path, Path | None, str]] = []
+    seen_model_paths: set[Path] = set()
+    for model_path, metadata_path, run_label in discover_local_model_artifacts(local_root, recursive=True):
+        model_name = model_path.name.lower()
+        model_stem = model_path.stem.lower()
+        if any(model_name.startswith(prefix) or model_stem.startswith(prefix.rstrip(".")) for prefix in prefixes):
+            resolved_model = model_path.resolve()
+            if resolved_model not in seen_model_paths:
+                matches.append((resolved_model, metadata_path.resolve() if metadata_path else None, run_label))
+                seen_model_paths.add(resolved_model)
+
+    return matches
+
+
+def resolve_latest_registry_reference(local_root: Path) -> Path:
+    direct_candidate = (local_root / "exports" / "latest.yaml").resolve()
+    if direct_candidate.exists():
+        return direct_candidate
+
+    matches = [
+        candidate.resolve()
+        for candidate in local_root.rglob("latest.yaml")
+        if candidate.is_file() and candidate.parent.name == "exports"
+    ]
+    if not matches:
+        raise FileNotFoundError(
+            f"Missing latest registry under {local_root}. Expected exports/latest.yaml or a nested */exports/latest.yaml. "
+            "Pass --model-path explicitly or export a model first."
+        )
+
+    if len(matches) == 1:
+        return matches[0]
+
+    local_matches = [candidate for candidate in matches if "local" in candidate.parts]
+    if len(local_matches) == 1:
+        return local_matches[0]
+
+    ranked_matches = sorted(matches, key=lambda candidate: (candidate.stat().st_mtime, str(candidate).lower()))
+    newest_match = ranked_matches[-1]
+    newest_mtime = newest_match.stat().st_mtime
+    newest_ties = [candidate for candidate in ranked_matches if candidate.stat().st_mtime == newest_mtime]
+    if len(newest_ties) == 1:
+        return newest_match
+
+    options = "\n".join(f"- {candidate}" for candidate in matches[:12])
+    raise ValueError(
+        f"Ambiguous latest registry under {local_root}. Provide --model-path explicitly or narrow the local root.\n{options}"
+    )
+
+
 def resolve_with_project_root(path_value: str) -> Path:
     raw = Path(path_value)
     if raw.is_absolute():
@@ -57,7 +213,7 @@ def resolve_with_project_root(path_value: str) -> Path:
 
 
 def read_json(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as handle:
+    with path.open("r", encoding="utf-8-sig") as handle:
         payload = json.load(handle)
     if not isinstance(payload, dict):
         raise ValueError(f"Invalid JSON object in {path}")
@@ -69,6 +225,18 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     with path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2, ensure_ascii=True)
         handle.write("\n")
+
+
+def is_all_run_selector(value: str | None) -> bool:
+    return isinstance(value, str) and value.strip().lower() == ALL_RUN_LABEL_SELECTOR
+
+
+def is_all_recursive_run_selector(value: str | None) -> bool:
+    return isinstance(value, str) and value.strip().lower() in {ALL_RECURSIVE_RUN_LABEL_SELECTOR, "all-recursive"}
+
+
+def is_bulk_run_selector(value: str | None) -> bool:
+    return is_all_run_selector(value) or is_all_recursive_run_selector(value)
 
 
 def parse_client_config_from_bundle(bundle: dict[str, Any]) -> dict[str, Any] | None:
@@ -207,6 +375,25 @@ def find_drive_file_id(service, *, name: str, parent_id: str, mime_type: str | N
     return str(files[0]["id"])
 
 
+def list_drive_files(service, *, parent_id: str, mime_type: str | None = None) -> list[dict[str, str]]:
+    q_parts = [
+        f"'{parent_id}' in parents",
+        "trashed = false",
+    ]
+    if mime_type:
+        q_parts.append(f"mimeType = '{mime_type}'")
+
+    response = service.files().list(
+        q=" and ".join(q_parts),
+        spaces="drive",
+        fields="files(id, name, modifiedTime)",
+        pageSize=1000,
+        orderBy="name",
+    ).execute()
+    files = response.get("files", [])
+    return [file for file in files if isinstance(file, dict)]
+
+
 def ensure_drive_folder(service, *, name: str, parent_id: str) -> str:
     folder_mime = "application/vnd.google-apps.folder"
     existing = find_drive_file_id(service, name=name, parent_id=parent_id, mime_type=folder_mime)
@@ -266,6 +453,184 @@ def read_drive_text(service, *, file_id: str) -> str:
     return payload.decode("utf-8")
 
 
+def ordered_registry_run_labels(registry_root: Path) -> list[str]:
+    models_root = registry_root / "models"
+    if not models_root.exists():
+        raise FileNotFoundError(f"Missing models folder in registry: {models_root}")
+
+    run_labels = sorted(path.name for path in models_root.iterdir() if path.is_dir())
+    if not run_labels:
+        raise FileNotFoundError(f"No run folders found in registry: {models_root}")
+
+    latest_path = registry_root / "latest.yaml"
+    latest_run_label = ""
+    if latest_path.exists():
+        latest_payload = read_yaml(latest_path)
+        latest_run_label = str(latest_payload.get("run_label") or "").strip()
+
+    if latest_run_label and latest_run_label in run_labels:
+        run_labels = [label for label in run_labels if label != latest_run_label] + [latest_run_label]
+
+    return run_labels
+
+
+def list_registry_entries(registry_root: Path) -> list[dict[str, str]]:
+    models_root = registry_root / "models"
+    if not models_root.exists():
+        raise FileNotFoundError(f"Missing models folder in registry: {models_root}")
+
+    entries: list[dict[str, str]] = []
+    for run_dir in sorted(path for path in models_root.iterdir() if path.is_dir()):
+        manifest_path = run_dir / "model_manifest.yaml"
+        if not manifest_path.exists():
+            continue
+        manifest = read_yaml(manifest_path)
+        model_filename = str(manifest.get("model_filename") or "").strip()
+        if not model_filename:
+            continue
+        entries.append({"run_label": run_dir.name, "model_filename": model_filename})
+
+    if not entries:
+        raise FileNotFoundError(f"No importable runs found in registry: {models_root}")
+    return entries
+
+
+def resolve_registry_run_labels_by_selector(selector: str, registry_root: Path) -> list[str]:
+    normalized = selector.strip().lower()
+    if not normalized:
+        return []
+
+    run_labels = ordered_registry_run_labels(registry_root)
+    exact_run_matches = [run_label for run_label in run_labels if run_label.lower() == normalized]
+    if exact_run_matches:
+        return exact_run_matches
+
+    entries = list_registry_entries(registry_root)
+    exact_model_matches = [
+        entry["run_label"]
+        for entry in entries
+        if entry["model_filename"].lower() == normalized or Path(entry["model_filename"]).stem.lower() == normalized
+    ]
+    if exact_model_matches:
+        return [run_label for run_label in run_labels if run_label in exact_model_matches]
+
+    prefixes = {normalized}
+    if normalized.endswith(".pt"):
+        prefixes.add(normalized[:-3])
+    else:
+        prefixes.add(f"{normalized}.pt")
+
+    prefix_matches = [
+        entry["run_label"]
+        for entry in entries
+        if any(
+            entry["model_filename"].lower().startswith(prefix)
+            or Path(entry["model_filename"]).stem.lower().startswith(prefix.rstrip("."))
+            for prefix in prefixes
+        )
+    ]
+    unique_prefix_matches: list[str] = []
+    seen: set[str] = set()
+    for run_label in run_labels:
+        if run_label in prefix_matches and run_label not in seen:
+            unique_prefix_matches.append(run_label)
+            seen.add(run_label)
+    return unique_prefix_matches
+
+
+def ordered_drive_registry_run_labels(service, *, registry_id: str, models_id: str) -> list[str]:
+    run_labels = sorted(
+        str(item.get("name") or "").strip()
+        for item in list_drive_files(
+            service,
+            parent_id=models_id,
+            mime_type="application/vnd.google-apps.folder",
+        )
+    )
+    run_labels = [label for label in run_labels if label]
+    if not run_labels:
+        raise FileNotFoundError("No run folders found in drive registry")
+
+    latest_id = find_drive_file_id(service, name="latest.yaml", parent_id=registry_id)
+    latest_run_label = ""
+    if latest_id:
+        latest_payload = yaml.safe_load(read_drive_text(service, file_id=latest_id)) or {}
+        latest_run_label = str(latest_payload.get("run_label") or "").strip()
+
+    if latest_run_label and latest_run_label in run_labels:
+        run_labels = [label for label in run_labels if label != latest_run_label] + [latest_run_label]
+
+    return run_labels
+
+
+def list_drive_registry_entries(service, *, models_id: str) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    for item in list_drive_files(
+        service,
+        parent_id=models_id,
+        mime_type="application/vnd.google-apps.folder",
+    ):
+        run_label = str(item.get("name") or "").strip()
+        run_dir_id = str(item.get("id") or "").strip()
+        if not run_label or not run_dir_id:
+            continue
+        manifest_id = find_drive_file_id(service, name="model_manifest.yaml", parent_id=run_dir_id)
+        if not manifest_id:
+            continue
+        manifest = yaml.safe_load(read_drive_text(service, file_id=manifest_id)) or {}
+        model_filename = str(manifest.get("model_filename") or "").strip()
+        if not model_filename:
+            continue
+        entries.append({"run_label": run_label, "model_filename": model_filename})
+
+    if not entries:
+        raise FileNotFoundError("No importable runs found in drive registry")
+    return entries
+
+
+def resolve_drive_registry_run_labels_by_selector(service, *, registry_id: str, models_id: str, selector: str) -> list[str]:
+    normalized = selector.strip().lower()
+    if not normalized:
+        return []
+
+    run_labels = ordered_drive_registry_run_labels(service, registry_id=registry_id, models_id=models_id)
+    exact_run_matches = [run_label for run_label in run_labels if run_label.lower() == normalized]
+    if exact_run_matches:
+        return exact_run_matches
+
+    entries = list_drive_registry_entries(service, models_id=models_id)
+    exact_model_matches = [
+        entry["run_label"]
+        for entry in entries
+        if entry["model_filename"].lower() == normalized or Path(entry["model_filename"]).stem.lower() == normalized
+    ]
+    if exact_model_matches:
+        return [run_label for run_label in run_labels if run_label in exact_model_matches]
+
+    prefixes = {normalized}
+    if normalized.endswith(".pt"):
+        prefixes.add(normalized[:-3])
+    else:
+        prefixes.add(f"{normalized}.pt")
+
+    prefix_matches = [
+        entry["run_label"]
+        for entry in entries
+        if any(
+            entry["model_filename"].lower().startswith(prefix)
+            or Path(entry["model_filename"]).stem.lower().startswith(prefix.rstrip("."))
+            for prefix in prefixes
+        )
+    ]
+    unique_prefix_matches: list[str] = []
+    seen: set[str] = set()
+    for run_label in run_labels:
+        if run_label in prefix_matches and run_label not in seen:
+            unique_prefix_matches.append(run_label)
+            seen.add(run_label)
+    return unique_prefix_matches
+
+
 def choose_local_artifacts(
     *,
     local_persistent_root: Path,
@@ -275,21 +640,39 @@ def choose_local_artifacts(
 ) -> tuple[Path, Path | None, str]:
     exports_root = local_persistent_root / "exports"
 
+    if is_bulk_run_selector(run_label_arg):
+        raise ValueError("bulk selectors are supported only at the command level")
+
     if model_path_arg:
-        model_path = resolve_with_persistent_root(model_path_arg, local_persistent_root)
-        metadata_path = (
-            resolve_with_persistent_root(metadata_path_arg, local_persistent_root)
-            if metadata_path_arg
-            else None
-        )
+        model_path = resolve_local_artifact_reference(model_path_arg, local_persistent_root)
+        metadata_path = None
+        if metadata_path_arg:
+            metadata_path = resolve_local_artifact_reference(metadata_path_arg, local_persistent_root)
+        else:
+            metadata_candidate = model_path.with_suffix(".yaml")
+            if metadata_candidate.exists() and metadata_candidate.is_file():
+                metadata_path = metadata_candidate
         run_label = run_label_arg or model_path.stem
         return model_path, metadata_path, run_label
 
-    latest_path = exports_root / "latest.yaml"
-    if not latest_path.exists():
-        raise FileNotFoundError(
-            f"Missing latest registry: {latest_path}. Pass --model-path explicitly or export a model first."
-        )
+    run_label_model_path = resolve_optional_local_model_reference(run_label_arg, local_persistent_root)
+    if run_label_model_path is not None:
+        metadata_path = None
+        metadata_candidate = run_label_model_path.with_suffix(".yaml")
+        if metadata_candidate.exists() and metadata_candidate.is_file():
+            metadata_path = metadata_candidate
+        return run_label_model_path, metadata_path, run_label_model_path.stem
+
+    if run_label_arg:
+        prefix_matches = select_local_artifacts_by_prefix(run_label_arg, local_persistent_root)
+        if prefix_matches:
+            if len(prefix_matches) == 1:
+                return prefix_matches[0]
+            raise ValueError(
+                f"Selector '{run_label_arg}' matches multiple local models and must be handled at command level."
+            )
+
+    latest_path = resolve_latest_registry_reference(local_persistent_root)
 
     latest = read_yaml(latest_path)
     model_rel = latest.get("model_path")
@@ -299,10 +682,10 @@ def choose_local_artifacts(
     metadata_rel = latest.get("metadata_path")
     run_label = run_label_arg or str(latest.get("run_label") or Path(model_rel).stem)
 
-    model_path = resolve_with_persistent_root(model_rel, local_persistent_root)
+    model_path = resolve_local_artifact_reference(model_rel, local_persistent_root)
     metadata_path = None
     if isinstance(metadata_rel, str) and metadata_rel.strip():
-        metadata_candidate = resolve_with_persistent_root(metadata_rel, local_persistent_root)
+        metadata_candidate = resolve_local_artifact_reference(metadata_rel, local_persistent_root)
         if metadata_candidate.exists():
             metadata_path = metadata_candidate
 
@@ -318,6 +701,41 @@ def export_to_drive(
     metadata_path_arg: str | None,
     run_label_arg: str | None,
 ) -> None:
+    if is_all_run_selector(run_label_arg) or is_all_recursive_run_selector(run_label_arg):
+        if model_path_arg or metadata_path_arg:
+            raise ValueError("--run-label all cannot be combined with --model-path or --metadata-path")
+
+        artifacts = discover_local_model_artifacts(
+            local_persistent_root,
+            recursive=is_all_recursive_run_selector(run_label_arg),
+        )
+        print(f"Discovered {len(artifacts)} model(s) under {local_persistent_root}")
+        for model_path, metadata_path, run_label in artifacts:
+            export_to_drive(
+                drive_root=drive_root,
+                registry_name=registry_name,
+                local_persistent_root=local_persistent_root,
+                model_path_arg=str(model_path),
+                metadata_path_arg=(str(metadata_path) if metadata_path is not None else None),
+                run_label_arg=run_label,
+            )
+        return
+
+    if run_label_arg and not model_path_arg:
+        prefix_matches = select_local_artifacts_by_prefix(run_label_arg, local_persistent_root)
+        if len(prefix_matches) > 1:
+            print(f"Selector '{run_label_arg}' matched {len(prefix_matches)} local model(s)")
+            for model_path, metadata_path, run_label in prefix_matches:
+                export_to_drive(
+                    drive_root=drive_root,
+                    registry_name=registry_name,
+                    local_persistent_root=local_persistent_root,
+                    model_path_arg=str(model_path),
+                    metadata_path_arg=(str(metadata_path) if metadata_path is not None else None),
+                    run_label_arg=run_label,
+                )
+            return
+
     model_path, metadata_path, run_label = choose_local_artifacts(
         local_persistent_root=local_persistent_root,
         model_path_arg=model_path_arg,
@@ -377,6 +795,43 @@ def export_to_drive_oauth(
     metadata_path_arg: str | None,
     run_label_arg: str | None,
 ) -> None:
+    if is_all_run_selector(run_label_arg) or is_all_recursive_run_selector(run_label_arg):
+        if model_path_arg or metadata_path_arg:
+            raise ValueError("--run-label all cannot be combined with --model-path or --metadata-path")
+
+        artifacts = discover_local_model_artifacts(
+            local_persistent_root,
+            recursive=is_all_recursive_run_selector(run_label_arg),
+        )
+        print(f"Discovered {len(artifacts)} model(s) under {local_persistent_root}")
+        for model_path, metadata_path, run_label in artifacts:
+            export_to_drive_oauth(
+                service=service,
+                drive_parent_id=drive_parent_id,
+                registry_name=registry_name,
+                local_persistent_root=local_persistent_root,
+                model_path_arg=str(model_path),
+                metadata_path_arg=(str(metadata_path) if metadata_path is not None else None),
+                run_label_arg=run_label,
+            )
+        return
+
+    if run_label_arg and not model_path_arg:
+        prefix_matches = select_local_artifacts_by_prefix(run_label_arg, local_persistent_root)
+        if len(prefix_matches) > 1:
+            print(f"Selector '{run_label_arg}' matched {len(prefix_matches)} local model(s)")
+            for model_path, metadata_path, run_label in prefix_matches:
+                export_to_drive_oauth(
+                    service=service,
+                    drive_parent_id=drive_parent_id,
+                    registry_name=registry_name,
+                    local_persistent_root=local_persistent_root,
+                    model_path_arg=str(model_path),
+                    metadata_path_arg=(str(metadata_path) if metadata_path is not None else None),
+                    run_label_arg=run_label,
+                )
+            return
+
     model_path, metadata_path, run_label = choose_local_artifacts(
         local_persistent_root=local_persistent_root,
         model_path_arg=model_path_arg,
@@ -442,8 +897,36 @@ def import_from_drive(
     if not registry_root.exists():
         raise FileNotFoundError(f"Drive registry folder not found: {registry_root}")
 
+    if is_bulk_run_selector(run_label_arg):
+        run_labels = ordered_registry_run_labels(registry_root)
+        print(f"Importing {len(run_labels)} run(s) from registry {registry_name}")
+        for run_label in run_labels:
+            import_from_drive(
+                drive_root=drive_root,
+                registry_name=registry_name,
+                target_persistent_root=target_persistent_root,
+                run_label_arg=run_label,
+                overwrite=overwrite,
+            )
+        return
+
     if run_label_arg:
-        run_label = run_label_arg
+        matching_run_labels = resolve_registry_run_labels_by_selector(run_label_arg, registry_root)
+        if matching_run_labels:
+            if len(matching_run_labels) > 1:
+                print(f"Selector '{run_label_arg}' matched {len(matching_run_labels)} run(s) in registry {registry_name}")
+                for run_label in matching_run_labels:
+                    import_from_drive(
+                        drive_root=drive_root,
+                        registry_name=registry_name,
+                        target_persistent_root=target_persistent_root,
+                        run_label_arg=run_label,
+                        overwrite=overwrite,
+                    )
+                return
+            run_label = matching_run_labels[0]
+        else:
+            run_label = run_label_arg
     else:
         latest = read_yaml(registry_root / "latest.yaml")
         run_label = str(latest.get("run_label") or "").strip()
@@ -470,27 +953,27 @@ def import_from_drive(
     if expected_sha and actual_sha != expected_sha:
         raise ValueError(f"SHA256 mismatch for {source_model}. expected={expected_sha} actual={actual_sha}")
 
-    exports_root = target_persistent_root / "exports"
-    exports_root.mkdir(parents=True, exist_ok=True)
+    target_root = target_persistent_root
+    target_root.mkdir(parents=True, exist_ok=True)
 
     import_suffix = build_import_suffix(registry_name, run_label)
 
-    target_model = resolve_import_target_path(exports_root / model_filename, overwrite, import_suffix)
+    target_model = resolve_import_target_path(target_root / model_filename, overwrite, import_suffix)
     shutil.copy2(source_model, target_model)
 
     target_metadata: Path | None = None
     if metadata_filename:
         source_metadata = version_dir / metadata_filename
         if source_metadata.exists():
-            target_metadata = resolve_import_target_path(exports_root / metadata_filename, overwrite, import_suffix)
+            target_metadata = resolve_import_target_path(target_root / metadata_filename, overwrite, import_suffix)
             shutil.copy2(source_metadata, target_metadata)
 
     latest_local = {
         "run_label": run_label,
-        "model_path": f"exports/{target_model.name}",
-        "metadata_path": f"exports/{target_metadata.name}" if target_metadata else None,
+        "model_path": target_model.name,
+        "metadata_path": target_metadata.name if target_metadata else None,
     }
-    write_yaml(exports_root / "latest.yaml", latest_local)
+    write_yaml(target_root / "latest.yaml", latest_local)
 
     if target_model.name != model_filename:
         print(f"Model name conflict detected, saved as: {target_model.name}")
@@ -499,7 +982,7 @@ def import_from_drive(
 
     print(f"Import completed: {target_model}")
     print(f"SHA256 verified: {actual_sha}")
-    print(f"Local latest: {exports_root / 'latest.yaml'}")
+    print(f"Local latest: {target_root / 'latest.yaml'}")
 
 
 def import_from_drive_oauth(
@@ -520,17 +1003,6 @@ def import_from_drive_oauth(
     if not registry_id:
         raise FileNotFoundError(f"Drive registry folder not found: {registry_name}")
 
-    if run_label_arg:
-        run_label = run_label_arg
-    else:
-        latest_id = find_drive_file_id(service, name="latest.yaml", parent_id=registry_id)
-        if not latest_id:
-            raise FileNotFoundError("latest.yaml not found in drive registry")
-        latest = yaml.safe_load(read_drive_text(service, file_id=latest_id)) or {}
-        run_label = str(latest.get("run_label") or "").strip()
-        if not run_label:
-            raise ValueError("latest.yaml does not contain run_label")
-
     models_id = find_drive_file_id(
         service,
         name="models",
@@ -539,6 +1011,52 @@ def import_from_drive_oauth(
     )
     if not models_id:
         raise FileNotFoundError("models folder not found in drive registry")
+
+    if is_bulk_run_selector(run_label_arg):
+        run_labels = ordered_drive_registry_run_labels(service, registry_id=registry_id, models_id=models_id)
+        print(f"Importing {len(run_labels)} run(s) from drive registry {registry_name}")
+        for run_label in run_labels:
+            import_from_drive_oauth(
+                service=service,
+                drive_parent_id=drive_parent_id,
+                registry_name=registry_name,
+                target_persistent_root=target_persistent_root,
+                run_label_arg=run_label,
+                overwrite=overwrite,
+            )
+        return
+
+    if run_label_arg:
+        matching_run_labels = resolve_drive_registry_run_labels_by_selector(
+            service,
+            registry_id=registry_id,
+            models_id=models_id,
+            selector=run_label_arg,
+        )
+        if matching_run_labels:
+            if len(matching_run_labels) > 1:
+                print(f"Selector '{run_label_arg}' matched {len(matching_run_labels)} run(s) in drive registry {registry_name}")
+                for run_label in matching_run_labels:
+                    import_from_drive_oauth(
+                        service=service,
+                        drive_parent_id=drive_parent_id,
+                        registry_name=registry_name,
+                        target_persistent_root=target_persistent_root,
+                        run_label_arg=run_label,
+                        overwrite=overwrite,
+                    )
+                return
+            run_label = matching_run_labels[0]
+        else:
+            run_label = run_label_arg
+    else:
+        latest_id = find_drive_file_id(service, name="latest.yaml", parent_id=registry_id)
+        if not latest_id:
+            raise FileNotFoundError("latest.yaml not found in drive registry")
+        latest = yaml.safe_load(read_drive_text(service, file_id=latest_id)) or {}
+        run_label = str(latest.get("run_label") or "").strip()
+        if not run_label:
+            raise ValueError("latest.yaml does not contain run_label")
 
     run_dir_id = find_drive_file_id(
         service,
@@ -564,11 +1082,11 @@ def import_from_drive_oauth(
     if not model_id:
         raise FileNotFoundError(f"Model file not found on drive for run {run_label}: {model_filename}")
 
-    exports_root = target_persistent_root / "exports"
-    exports_root.mkdir(parents=True, exist_ok=True)
+    target_root = target_persistent_root
+    target_root.mkdir(parents=True, exist_ok=True)
     import_suffix = build_import_suffix(registry_name, run_label)
 
-    target_model = resolve_import_target_path(exports_root / model_filename, overwrite, import_suffix)
+    target_model = resolve_import_target_path(target_root / model_filename, overwrite, import_suffix)
     download_drive_file(service, file_id=model_id, target_path=target_model)
 
     actual_sha = sha256_of_file(target_model)
@@ -582,15 +1100,15 @@ def import_from_drive_oauth(
     if metadata_filename:
         metadata_id = find_drive_file_id(service, name=metadata_filename, parent_id=run_dir_id)
         if metadata_id:
-            target_metadata = resolve_import_target_path(exports_root / metadata_filename, overwrite, import_suffix)
+            target_metadata = resolve_import_target_path(target_root / metadata_filename, overwrite, import_suffix)
             download_drive_file(service, file_id=metadata_id, target_path=target_metadata)
 
     latest_local = {
         "run_label": run_label,
-        "model_path": f"exports/{target_model.name}",
-        "metadata_path": f"exports/{target_metadata.name}" if target_metadata else None,
+        "model_path": target_model.name,
+        "metadata_path": target_metadata.name if target_metadata else None,
     }
-    write_yaml(exports_root / "latest.yaml", latest_local)
+    write_yaml(target_root / "latest.yaml", latest_local)
 
     if target_model.name != model_filename:
         print(f"Model name conflict detected, saved as: {target_model.name}")
@@ -599,7 +1117,7 @@ def import_from_drive_oauth(
 
     print(f"Import completed: {target_model}")
     print(f"SHA256 verified: {actual_sha}")
-    print(f"Local latest: {exports_root / 'latest.yaml'}")
+    print(f"Local latest: {target_root / 'latest.yaml'}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -659,7 +1177,14 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--model-path", type=str, default="", help="Model path for export (optional)")
     parser.add_argument("--metadata-path", type=str, default="", help="Metadata path for export (optional)")
-    parser.add_argument("--run-label", type=str, default="", help="Run label for export/import (optional)")
+    parser.add_argument(
+        "--run-label",
+        type=str,
+        nargs="?",
+        const="",
+        default="",
+        help="Run label for export/import (optional)",
+    )
 
     parser.add_argument(
         "--target-persistent-root",

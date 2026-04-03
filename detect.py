@@ -51,6 +51,12 @@ def resolve_portable_artifact_path(path_value: str, pointer_path: Path) -> str:
     candidate = Path(path_value)
     if candidate.is_absolute():
         return str(candidate)
+
+    sibling_root = pointer_path.parent
+    sibling_candidate = (sibling_root / candidate).resolve()
+    if sibling_candidate.exists():
+        return str(sibling_candidate)
+
     persistent_root = pointer_path.parent.parent
     return str((persistent_root / candidate).resolve())
 
@@ -70,8 +76,16 @@ def resolve_default_model_path() -> str:
     """Resolve the preferred trained model path from the persistent registry."""
     candidate_files = [
         PROJECT_ROOT / "artifacts/local/exports/latest.yaml",
-        PROJECT_ROOT / "artifacts/cloud/exports/latest.yaml",
+        PROJECT_ROOT / "artifacts/cloud-notebook-local/exports/latest.yaml",
     ]
+
+    for latest_path in sorted(PROJECT_ROOT.glob("artifacts/**/exports/latest.yaml")):
+        if latest_path not in candidate_files:
+            candidate_files.append(latest_path)
+
+    for latest_path in sorted(PROJECT_ROOT.glob("artifacts/**/latest.yaml")):
+        if latest_path not in candidate_files:
+            candidate_files.append(latest_path)
 
     for candidate in candidate_files:
         if candidate.suffix.lower() in {".yaml", ".yml"} and candidate.exists():
@@ -109,12 +123,16 @@ class FireDetector:
             conf_threshold: Soglia di confidenza per le detections
             device: Device per inference ('cpu' o numero GPU come stringa)
         """
-        resolved_model_path = model_path or resolve_default_model_path()
+        normalized_model_path = (model_path or "").strip()
+        if normalized_model_path.lower() in {"", "latest", "auto", "default"}:
+            resolved_model_path = resolve_default_model_path()
+        else:
+            resolved_model_path = normalized_model_path
 
         if not os.path.exists(resolved_model_path):
             raise FileNotFoundError(
                 f"Modello non trovato: {resolved_model_path}\n"
-                "Esegui prima: python run_experiment.py --config configs/local.default.yaml"
+                "Esegui prima: python run_experiment.py --config configs/generated/latest.local.yaml"
             )
         
         print(f"Caricamento modello: {resolved_model_path}")
@@ -916,8 +934,10 @@ Examples:
     parser.add_argument(
         "--weights",
         type=str,
-        default=None,
-        help="Percorso del modello YOLOv8. Se omesso usa il modello registrato piu' recente."
+        nargs="?",
+        const="latest",
+        default="latest",
+        help="Percorso del modello YOLOv8. Se omesso (o latest/auto/default) usa il modello registrato piu' recente."
     )
     parser.add_argument(
         "--conf",
@@ -933,7 +953,7 @@ Examples:
     )
     
     args = parser.parse_args()
-    
+
     try:
         # Inizializza il detector
         detector = FireDetector(

@@ -60,7 +60,7 @@ def parse_args() -> argparse.Namespace:
         "--config",
         action="append",
         default=[],
-        help="Config YAML da confrontare. Ripetibile, es. --config configs/cloud.default.yaml --config configs/cloud.fast-debug.yaml",
+        help="Config YAML da confrontare. Ripetibile, es. --config configs/presets/default.yaml --config configs/presets/fast-debug.yaml",
     )
     parser.add_argument("--output-json", type=str, default="", help="Path opzionale per salvare risultati JSON")
     return parser.parse_args()

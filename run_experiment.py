@@ -13,6 +13,7 @@ from typing import Any
 
 import yaml
 
+from config_utils import deep_merge, load_layered_config
 from generator import generate_dataset
 from settings import DatasetGenerationSettings, ImageTransformSettings, TrainingSettings
 from train import create_dataset_yaml, train_model
@@ -57,22 +58,10 @@ def apply_overrides(cls: type, overrides: dict[str, Any], section_name: str) -> 
         setattr(cls, attr_name, value)
 
 
-def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    """Recursively merge two dictionaries."""
-    merged = dict(base)
-    for key, value in override.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = deep_merge(merged[key], value)
-        else:
-            merged[key] = value
-    return merged
-
-
 def default_config() -> dict[str, Any]:
-    """Default configuration for local or cloud experiments."""
+    """Default configuration for experiments."""
     return {
         "project": {
-            "environment": "local",
             "label": "baseline",
             "persistent_root": "artifacts/local",
         },
@@ -91,6 +80,7 @@ def default_config() -> dict[str, Any]:
             "model_size": TrainingSettings.MODEL_SIZE,
             "weights": None,
             "device": TrainingSettings.DEVICE,
+            "require_gpu": False,
             "epochs": TrainingSettings.EPOCHS,
             "batch_size": TrainingSettings.BATCH_SIZE,
             "image_size": TrainingSettings.IMAGE_SIZE,
@@ -104,10 +94,7 @@ def default_config() -> dict[str, Any]:
 
 def load_config(config_path: Path) -> dict[str, Any]:
     """Load and merge the YAML config with defaults."""
-    with open(config_path, "r", encoding="utf-8") as handle:
-        loaded = yaml.safe_load(handle) or {}
-    if not isinstance(loaded, dict):
-        raise ValueError("Il file di configurazione deve contenere una mappa YAML")
+    loaded = load_layered_config(config_path)
     return deep_merge(default_config(), loaded)
 
 
@@ -216,7 +203,6 @@ def build_dataset_manifest(
         "created_at": created_at,
         "status": status,
         "label": dataset_cfg["label"],
-        "environment": project_cfg["environment"],
         "fingerprint": fingerprint,
         "root": portable_path(dataset_root, persistent_root),
         "yolo_dataset_path": portable_path(yolo_dataset_path, persistent_root),
@@ -224,6 +210,8 @@ def build_dataset_manifest(
         "stats": stats,
         "counts": counts,
     }
+    if project_cfg.get("environment"):
+        manifest["environment"] = project_cfg["environment"]
     if status == "completed":
         manifest["completed_at"] = datetime.now(timezone.utc).isoformat()
     return manifest
@@ -356,7 +344,6 @@ def build_run_label(config: dict[str, Any], dataset_fingerprint: str) -> str:
     training_slug = slugify(training_cfg["label"])
     model_slug = slugify(f"yolov8{training_cfg['model_size']}")
     raw_parts = [
-        slugify(project_cfg["environment"]),
         slugify(project_cfg["label"]),
         training_slug,
         model_slug,
@@ -441,8 +428,8 @@ def cleanup_completed_run(run_dir: Path) -> None:
     shutil.rmtree(run_dir / "weights", ignore_errors=True)
 
 
-def run_pipeline(config: dict[str, Any], config_path: Path) -> dict[str, Any]:
-    """Execute the full dataset-generation and training pipeline."""
+def run_pipeline(config: dict[str, Any], config_path: Path, *, skip_training: bool = False) -> dict[str, Any]:
+    """Execute the dataset-generation pipeline and optionally skip training."""
     project_cfg = config["project"]
     training_cfg = config["training"]
 
@@ -458,6 +445,8 @@ def run_pipeline(config: dict[str, Any], config_path: Path) -> dict[str, Any]:
     run_label = build_run_label(config, dataset_info["fingerprint"])
     run_dir = runs_root / run_label
     resume_enabled = resolve_resume_policy(run_dir, training_cfg["resume"])
+    require_gpu = bool(training_cfg.get("require_gpu", False))
+    training_cfg["require_gpu"] = require_gpu
 
     resolved_config = {
         "config_path": portable_path(config_path, PROJECT_ROOT),
@@ -470,12 +459,35 @@ def run_pipeline(config: dict[str, Any], config_path: Path) -> dict[str, Any]:
         "resolved_dataset_root": portable_path(dataset_info["root"], persistent_root),
         "run_label": run_label,
         "resume_enabled": resume_enabled,
+        "skip_training": skip_training,
     }
     write_yaml(run_dir / "resolved_config.yaml", resolved_config)
 
+    if skip_training:
+        summary = {
+            "mode": "dataset-only",
+            "dataset_root": portable_path(dataset_info["root"], persistent_root),
+            "dataset_manifest_path": portable_path(dataset_info["manifest_path"], persistent_root),
+            "run_dir": portable_path(run_dir, persistent_root),
+            "resolved_config_path": portable_path(run_dir / "resolved_config.yaml", persistent_root),
+            "run_label": run_label,
+            "resume_enabled": resume_enabled,
+            "dataset_fingerprint": dataset_info["fingerprint"],
+            "dataset_reused": dataset_info["reused"],
+        }
+        write_yaml(run_dir / "pipeline_summary.yaml", summary)
+
+        print("\n" + "=" * 60)
+        print("Pipeline completata (training saltato)")
+        print("=" * 60)
+        print(f"Dataset: {summary['dataset_root']}")
+        print(f"Manifest: {summary['dataset_manifest_path']}")
+        print(f"Run metadata: {summary['resolved_config_path']}")
+
+        return summary
+
     extra_summary = {
         "run_label": run_label,
-        "environment": project_cfg["environment"],
         "dataset_fingerprint": dataset_info["fingerprint"],
         "dataset_manifest_path": portable_path(dataset_info["manifest_path"], persistent_root),
         "dataset_reused": dataset_info["reused"],
@@ -483,6 +495,8 @@ def run_pipeline(config: dict[str, Any], config_path: Path) -> dict[str, Any]:
         "base_image_usage": dataset_info["manifest"].get("stats", {}).get("base_image_usage", {}),
         "resolved_config_path": portable_path(run_dir / "resolved_config.yaml", persistent_root),
     }
+    if project_cfg.get("environment"):
+        extra_summary["environment"] = project_cfg["environment"]
 
     train_model(
         model_size=training_cfg["model_size"],
@@ -490,6 +504,7 @@ def run_pipeline(config: dict[str, Any], config_path: Path) -> dict[str, Any]:
         batch_size=training_cfg["batch_size"],
         image_size=training_cfg["image_size"],
         device=training_cfg["device"],
+        require_gpu=require_gpu,
         resume=resume_enabled,
         dataset_root=str(dataset_info["root"]),
         project_name=str(runs_root),
@@ -545,8 +560,9 @@ def run_pipeline(config: dict[str, Any], config_path: Path) -> dict[str, Any]:
 
 def main() -> None:
     """CLI entrypoint for config-driven experiments."""
-    parser = argparse.ArgumentParser(description="Pipeline locale/cloud guidata da file YAML")
+    parser = argparse.ArgumentParser(description="Pipeline guidata da file YAML")
     parser.add_argument("--config", type=str, required=True, help="Percorso al file YAML di configurazione")
+    parser.add_argument("--skip-training", action="store_true", help="Genera o riusa il dataset senza avviare il training")
     args = parser.parse_args()
 
     config_path = resolve_path(args.config, PROJECT_ROOT)
@@ -554,7 +570,7 @@ def main() -> None:
         raise FileNotFoundError(f"Config non trovata: {args.config}")
 
     config = load_config(config_path)
-    run_pipeline(config, config_path)
+    run_pipeline(config, config_path, skip_training=args.skip_training)
 
 
 if __name__ == "__main__":

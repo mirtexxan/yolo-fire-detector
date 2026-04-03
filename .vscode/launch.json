@@ -2,6 +2,14 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Open Experiment Configurator",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tools/cloud/cloud_configurator.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    },
+    {
       "name": "Local Pipeline (YAML)",
       "type": "debugpy",
       "request": "launch",
@@ -10,105 +18,20 @@
       "cwd": "${workspaceFolder}",
       "args": [
         "--config",
-        "${input:localPipelineConfigPath}"
+        "${input:pipelineConfigPathLocalLatest}"
       ]
     },
     {
-      "name": "Dataset Generation Only (YAML)",
+      "name": "Prepare Dataset (Skip Training)",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/run_generation.py",
+      "program": "${workspaceFolder}/run_experiment.py",
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",
       "args": [
         "--config",
-        "${input:generationConfigPath}"
-      ]
-    },
-    {
-      "name": "Detect Webcam (Latest Export)",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/detect.py",
-      "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}",
-      "args": [
-        "--source",
-        "webcam"
-      ]
-    },
-    {
-      "name": "Start Fake RTMP From Webcam 2",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/tools/streaming/fake_rtmp_webcam.py",
-      "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}",
-      "args": [
-        "--camera",
-        "2"
-      ]
-    },
-    {
-      "name": "Detect Validation Images (Latest Export)",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/detect.py",
-      "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}",
-      "args": [
-        "--source",
-        "${workspaceFolder}/artifacts/local/datasets/smoke-dataset-4f999b314f/images/val",
-        "--conf",
-        "0.3"
-      ]
-    },
-    {
-      "name": "Detect Video File (Latest Export)",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/detect.py",
-      "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}",
-      "args": [
-        "--source",
-        "${input:detectVideoPath}"
-      ]
-    },
-    {
-      "name": "Detect Stream (Latest Export)",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/detect.py",
-      "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}",
-      "args": [
-        "--source",
-        "${input:detectStreamUrl}"
-      ]
-    },
-    {
-      "name": "Detect Fake RTMP Webcam 2",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/detect.py",
-      "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}",
-      "args": [
-        "--source",
-        "rtmp://127.0.0.1:1935/webcam2"
-      ]
-    },
-    {
-      "name": "Detect Image Folder (Latest Export)",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/detect.py",
-      "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}",
-      "args": [
-        "--source",
-        "${input:detectImageFolder}"
+        "${input:pipelineConfigPathSkipTrainingLocalLatest}",
+        "--skip-training"
       ]
     },
     {
@@ -121,6 +44,78 @@
       "args": [
         "--output",
         "dist/yolo-fire-detector-cloud.zip"
+      ]
+    },
+    {
+        "name": "Detect Webcam (Latest Model)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/detect.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "--source",
+        "webcam",
+        "--weights",
+        "${input:detectWeightsPath}",
+        "--conf",
+        "${input:detectConfidence}",
+        "--device",
+        "${input:detectDevice}"
+      ]
+    },
+    {
+      "name": "Detect Video File (Latest Model)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/detect.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "--source",
+        "${input:detectSourceVideoPath}",
+        "--weights",
+        "${input:detectWeightsPath}",
+        "--conf",
+        "${input:detectConfidence}",
+        "--device",
+        "${input:detectDevice}"
+      ]
+    },
+    {
+      "name": "Detect Stream (Latest Model)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/detect.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "--source",
+        "${input:detectSourceStreamUrl}",
+        "--weights",
+        "${input:detectWeightsPath}",
+        "--conf",
+        "${input:detectConfidence}",
+        "--device",
+        "${input:detectDevice}"
+      ]
+    },
+    {
+      "name": "Detect Image Folder (Latest Model)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/detect.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "--source",
+        "${input:detectSourceImageFolder}",
+        "--weights",
+        "${input:detectWeightsPath}",
+        "--conf",
+        "${input:detectConfidence}",
+        "--device",
+        "${input:detectDevice}"
       ]
     },
     {
@@ -137,11 +132,13 @@
         "--registry-name",
         "${input:driveRegistryName}",
         "--drive-parent-id",
-        "${input:googleDriveParentId}",
+        "${input:driveParentId}",
         "--oauth-credentials-file",
-        "${input:googleOauthCredentialsFile}",
+        "${input:oauthCredentialsFile}",
         "--local-persistent-root",
-        "${input:localPersistentRoot}"
+        "${input:registryExportPersistentRoot}",
+        "--run-label",
+        "${input:driveExportRunLabelOptionalAll}"
       ]
     },
     {
@@ -158,60 +155,72 @@
         "--registry-name",
         "${input:driveRegistryName}",
         "--drive-parent-id",
-        "${input:googleDriveParentId}",
+        "${input:driveParentId}",
         "--oauth-credentials-file",
-        "${input:googleOauthCredentialsFile}",
+        "${input:oauthCredentialsFile}",
         "--target-persistent-root",
-        "${input:localPersistentRoot}",
+        "${input:registryImportPersistentRoot}",
         "--run-label",
-        "${input:driveImportRunLabel}"
+        "${input:driveImportRunLabelOptionalAll}"
       ]
     }
   ],
   "inputs": [
     {
-      "id": "localPipelineConfigPath",
+      "id": "pipelineConfigPathLocalLatest",
       "type": "promptString",
-      "description": "Path del file YAML per la pipeline locale completa",
-      "default": "${workspaceFolder}/configs/local.default.yaml"
+      "description": "Path del file YAML della pipeline",
+      "default": "${workspaceFolder}/configs/generated/latest.local.yaml"
     },
     {
-      "id": "generationConfigPath",
+      "id": "pipelineConfigPathSkipTrainingLocalLatest",
       "type": "promptString",
-      "description": "Path del file YAML per la sola generazione dataset",
-      "default": "${workspaceFolder}/configs/local.generate-only.yaml"
+      "description": "Path del file YAML della pipeline da eseguire con --skip-training",
+      "default": "${workspaceFolder}/configs/generated/latest.local.yaml"
     },
     {
-      "id": "detectVideoPath",
+      "id": "detectWeightsPath",
       "type": "promptString",
-      "description": "Path del file video da analizzare"
+      "description": "Modello per detect.py: usa 'latest' per il piu' recente oppure inserisci path .pt specifico",
+      "default": "latest"
     },
     {
-      "id": "detectStreamUrl",
+      "id": "detectConfidence",
       "type": "promptString",
-      "description": "URL RTMP/RTSP dello stream da analizzare"
+      "description": "Soglia di confidenza per detect.py",
+      "default": "0.5"
     },
     {
-      "id": "detectImageFolder",
+      "id": "detectDevice",
       "type": "promptString",
-      "description": "Cartella di immagini da analizzare"
+      "description": "Device per detect.py: cpu oppure indice GPU CUDA",
+      "default": "cpu"
     },
     {
-      "id": "googleDriveRoot",
+      "id": "detectSourceVideoPath",
       "type": "promptString",
-      "description": "Root locale Google Drive (solo filesystem mode, es. G:/My Drive)",
-      "default": "G:/My Drive"
+      "description": "Path del file video da analizzare con detect.py"
     },
     {
-      "id": "googleDriveParentId",
+      "id": "detectSourceStreamUrl",
       "type": "promptString",
-      "description": "OAuth mode: folder ID parent su Google Drive (root = cartella principale)",
+      "description": "URL RTMP o RTSP dello stream da analizzare con detect.py"
+    },
+    {
+      "id": "detectSourceImageFolder",
+      "type": "promptString",
+      "description": "Cartella di immagini da analizzare con detect.py"
+    },
+    {
+      "id": "driveParentId",
+      "type": "promptString",
+      "description": "Folder ID parent su Google Drive per il registry (root = cartella principale)",
       "default": "root"
     },
     {
-      "id": "googleOauthCredentialsFile",
+      "id": "oauthCredentialsFile",
       "type": "promptString",
-      "description": "Path file locale credenziali OAuth (client_secrets + token)",
+      "description": "Path del file locale credenziali OAuth (client_secrets + token)",
       "default": "${workspaceFolder}/tools/model_registry/oauth_credentials.local.json"
     },
     {
@@ -221,15 +230,27 @@
       "default": "yolo-fire-detector-models"
     },
     {
-      "id": "localPersistentRoot",
+      "id": "registryExportPersistentRoot",
       "type": "promptString",
-      "description": "Root persistente locale per export/import",
+      "description": "Root persistente locale usata per leggere gli export da pubblicare su Drive (all = solo cartella, all-r = ricorsivo)",
       "default": "${workspaceFolder}/artifacts/local"
     },
     {
-      "id": "driveImportRunLabel",
+      "id": "registryImportPersistentRoot",
       "type": "promptString",
-      "description": "Run label da importare (vuoto = latest)",
+      "description": "Root persistente locale dove salvare i modelli importati dal registry",
+      "default": "${workspaceFolder}/artifacts/imported"
+    },
+    {
+      "id": "driveExportRunLabelOptionalAll",
+      "type": "promptString",
+      "description": "Selettore export (vuoto = latest, all = tutti i .pt nella cartella, all-r = ricorsivo; nome/path = match esatto, altrimenti prefix startswith)",
+      "default": ""
+    },
+    {
+      "id": "driveImportRunLabelOptionalAll",
+      "type": "promptString",
+      "description": "Selettore import (vuoto = latest, all = tutte le run, all-r = alias di all; nome modello/run = match esatto, altrimenti prefix startswith)",
       "default": ""
     }
   ]

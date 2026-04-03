@@ -1,0 +1,18 @@
+project:
+  persistent_root: artifacts/local-smoke
+  label: local-cpu-smoke
+
+dataset:
+  label: smoke-dataset
+  num_images: 12
+  image_size: 320
+  force_regenerate: true
+
+training:
+  label: smoke-training
+  device: cpu
+  require_gpu: false
+  epochs: 1
+  batch_size: 4
+  image_size: 320
+  resume: never

@@ -3,7 +3,16 @@
 import argparse
 import json
 from pathlib import Path
+import sys
 import zipfile
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from config_utils import LATEST_CLOUD_CONFIG_RELATIVE, choose_default_cloud_launchable_config
+
+BUNDLED_CLOUD_CONFIG_RELATIVE = Path("configs") / LATEST_CLOUD_CONFIG_RELATIVE
 
 
 DEFAULT_EXCLUDES = {
@@ -36,6 +45,10 @@ DEFAULT_INCLUDE_SUFFIXES = {
     ".md",
 }
 
+def detect_default_launchable_config(project_root: Path) -> str | None:
+    """Return the single cloud config that must be bundled."""
+    return choose_default_cloud_launchable_config(project_root / "configs")
+
 
 def should_skip(path: Path, include_dataset: bool, include_runs: bool) -> bool:
     parts = set(path.parts)
@@ -49,6 +62,10 @@ def should_skip(path: Path, include_dataset: bool, include_runs: bool) -> bool:
 
 
 def should_include(relative_path: Path) -> bool:
+    if relative_path.parts[:2] == ("configs", "generated"):
+        return relative_path == BUNDLED_CLOUD_CONFIG_RELATIVE
+    if relative_path.parts[:1] == ("configs",):
+        return False
     if relative_path.name in DEFAULT_INCLUDE_NAMES or relative_path.suffix.lower() in DEFAULT_INCLUDE_SUFFIXES:
         return True
     if relative_path.suffix.lower() == ".pt" and len(relative_path.parts) == 1:
@@ -77,6 +94,11 @@ def create_bundle(
 ) -> None:
     files_added = 0
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    default_launchable_config = detect_default_launchable_config(project_root)
+    if default_launchable_config != LATEST_CLOUD_CONFIG_RELATIVE.as_posix():
+        raise FileNotFoundError(
+            "Config cloud mancante: genera prima configs/generated/latest.cloud.yaml con il configuratore usando un runtime cloud."
+        )
 
     with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for candidate in project_root.rglob("*"):
@@ -88,15 +110,17 @@ def create_bundle(
             if not should_include(relative_path):
                 continue
             if strip_notebook_output and candidate.suffix.lower() == ".ipynb":
-                archive.writestr(str(relative_path), strip_notebook_outputs(candidate))
+                archive.writestr(relative_path.as_posix(), strip_notebook_outputs(candidate))
             else:
-                archive.write(candidate, arcname=str(relative_path))
+                archive.write(candidate, arcname=relative_path.as_posix())
             files_added += 1
 
     bundle_size_mb = output_path.stat().st_size / (1024 * 1024)
     print(f"Bundle creato: {output_path}")
     print(f"File inclusi: {files_added}")
     print(f"Dimensione: {bundle_size_mb:.2f} MB")
+    if default_launchable_config is not None:
+        print(f"Config cloud inclusa nel bundle: {default_launchable_config}")
     print("Passo successivo: carica lo zip in Colab o in Google Drive.")
 
 
@@ -112,7 +136,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    project_root = Path(__file__).resolve().parents[2]
+    project_root = PROJECT_ROOT
     output_path = (project_root / args.output).resolve()
     create_bundle(
         project_root,

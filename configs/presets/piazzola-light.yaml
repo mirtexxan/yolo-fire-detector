@@ -1,7 +1,5 @@
 project:
-  environment: local
   label: piazzola-light
-  persistent_root: artifacts/local
 
 dataset:
   label: piazzola-light-dataset

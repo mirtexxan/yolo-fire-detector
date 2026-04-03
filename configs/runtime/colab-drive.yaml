@@ -1,0 +1,6 @@
+project:
+  persistent_root: /content/drive/MyDrive/yolo-fire-detector
+
+training:
+  device: "0"
+  require_gpu: true
