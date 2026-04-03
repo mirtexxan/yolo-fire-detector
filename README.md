@@ -23,7 +23,8 @@ Comandi minimi:
 
 ```bash
 pip install -r requirements.txt
-python run_experiment.py --config configs/presets/smoke.yaml
+python tools/cloud/cloud_configurator.py
+python run_experiment.py --config configs/generated/latest.local.yaml
 python detect.py --source webcam
 ```
 
@@ -55,7 +56,7 @@ Prima di eseguire il progetto, verifica questi punti:
 1. il terminale deve essere aperto nella root del repository
 2. Python deve essere disponibile nel sistema
 3. il file `requirements.txt` deve essere installato
-4. il file `yolov8n.pt` deve essere presente nella root del progetto
+4. almeno un file config deve essere disponibile in `configs/generated/`
 
 Esempio con ambiente virtuale:
 
@@ -95,10 +96,9 @@ Queste sono le cartelle e i file che conviene conoscere subito:
 
 ## Come funzionano le configurazioni
 
-Le configurazioni si trovano in `configs/` e sono organizzate in tre gruppi:
+Le configurazioni si trovano in `configs/` e sono organizzate in due gruppi:
 
-- `configs/presets/`: preset di esperimento pronti all'uso
-- `configs/runtime/`: override per l'ambiente di esecuzione
+- `configs/presets/`: preset opzionali separati per dataset e training (`dataset/` e `training/`)
 - `configs/generated/`: configurazioni finali generate dal configuratore
 
 I due file piu' importanti generati automaticamente sono:
@@ -106,37 +106,36 @@ I due file piu' importanti generati automaticamente sono:
 - `configs/generated/latest.local.yaml`: configurazione locale piu' recente
 - `configs/generated/latest.cloud.yaml`: configurazione cloud piu' recente
 
-La GUI `tools/cloud/cloud_configurator.py` parte da un preset, applica un runtime override obbligatorio e salva una configurazione finale in `configs/generated/`.
+La GUI `tools/cloud/cloud_configurator.py` usa 3 tab (`Generale`, `Presets`, `Avanzate`):
+
+- in `Generale` compili i parametri minimi obbligatori
+- in `Presets` puoi caricare preset dataset/training o una config completa (opzionale)
+- in `Avanzate` puoi attivare override puntuali
 
 ## Primo uso in locale
 
 ### 1. Esegui uno smoke test
 
-Il test piu' semplice per verificare che il progetto funzioni e' questo:
+Il test piu' semplice con flusso attuale e' questo:
 
-```bash
-python run_experiment.py --config configs/presets/smoke.yaml
-```
+1. genera una config locale con il configuratore
+2. esegui la pipeline sulla config generata
 
-Questo comando esegue una run ridotta utile per controllare che generazione, training ed export siano operativi.
-
-### 2. Esegui una run locale standard
-
-Per una prova locale piu' realistica:
-
-```bash
-python run_experiment.py --config configs/presets/baseline-lite.yaml
-```
-
-Se preferisci preparare una configurazione guidata con interfaccia grafica:
+Comandi:
 
 ```bash
 python tools/cloud/cloud_configurator.py
+python run_experiment.py --config configs/generated/latest.local.yaml
 ```
 
-Dopo il salvataggio, puoi eseguire la configurazione finale generata con:
+La pipeline esegue generazione dataset, training ed export usando l'ultima config locale.
+
+### 2. Esegui una run locale standard
+
+Per una prova locale realistica con parametri personalizzati:
 
 ```bash
+python tools/cloud/cloud_configurator.py
 python run_experiment.py --config configs/generated/latest.local.yaml
 ```
 
@@ -290,16 +289,28 @@ Per cartelle di immagini:
 
 ## Come scegliere il preset iniziale
 
-Per la maggior parte dei casi, il preset piu' semplice da cui partire e':
+Nel configuratore i preset sono opzionali e divisi in due famiglie:
 
 ```text
-configs/presets/balanced-mini-fires.yaml
+configs/presets/dataset/
+configs/presets/training/
 ```
 
-Se vuoi un controllo rapido della pipeline usa invece:
+Scelta rapida consigliata:
+
+- dataset: `standard.yaml`
+- training: `standard.yaml`
+
+Per test veloci:
+
+- dataset: `test-rapido.yaml`
+- training: `test-rapido.yaml`
+
+Per casi difficili:
 
 ```text
-configs/presets/smoke.yaml
+dataset/fuochi-piccoli.yaml + training/alta-recall.yaml
+dataset/anti-falsi-positivi.yaml + training/modello-grande.yaml
 ```
 
 Per una panoramica completa dei preset disponibili, consulta `TRAINING_PRESETS.md`.
@@ -309,12 +320,13 @@ Per una panoramica completa dei preset disponibili, consulta `TRAINING_PRESETS.m
 Il flusso cloud corretto e' questo:
 
 1. apri `tools/cloud/cloud_configurator.py`
-2. scegli un preset e un runtime cloud
-3. salva la configurazione finale
-4. esegui `python tools/cloud/prepare_cloud_bundle.py`
-5. carica `dist/yolo-fire-detector-cloud.zip` su Colab o Google Drive
-6. apri `cloud_train.ipynb`
-7. esegui le celle nell'ordine proposto
+2. imposta `Ambiente = Cloud` e compila i parametri base
+3. applica preset dataset/training solo se utili (opzionale)
+4. salva la configurazione finale
+5. esegui `python tools/cloud/prepare_cloud_bundle.py`
+6. carica `dist/yolo-fire-detector-cloud.zip` su Colab o Google Drive
+7. apri `cloud_train.ipynb`
+8. esegui le celle nell'ordine proposto
 
 Il notebook usa `configs/generated/latest.cloud.yaml` gia' inclusa nel bundle. Per la procedura completa, consulta `CLOUD_TRAINING.md`.
 
@@ -341,7 +353,7 @@ Il bundle include automaticamente codice Python, notebook, file YAML, documentaz
 Esegui prima una run completa, ad esempio:
 
 ```bash
-python run_experiment.py --config configs/presets/default.yaml
+python run_experiment.py --config configs/generated/latest.local.yaml
 ```
 
 Poi verifica che esista:

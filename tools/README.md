@@ -20,10 +20,10 @@ E' una GUI Tkinter per creare una configurazione finale senza modificare i file 
 
 Funzioni principali:
 
-- parte da un preset in `configs/presets/`
-- richiede un runtime override in `configs/runtime/`
-- salva la configurazione finale in `configs/generated/`
-- aggiorna automaticamente `latest.local.yaml` oppure `latest.cloud.yaml` in base al runtime scelto
+- workflow in 3 tab (`Generale`, `Presets`, `Avanzate`)
+- preset dataset/training opzionali da `configs/presets/dataset/` e `configs/presets/training/`
+- salvataggio della configurazione finale in `configs/generated/`
+- aggiornamento automatico di `latest.local.yaml` oppure `latest.cloud.yaml` in base all'ambiente selezionato
 
 Comando:
 

@@ -21,10 +21,9 @@ In locale devi avere questi elementi pronti:
 
 - il repository aggiornato
 - le dipendenze Python installate
-- almeno un preset disponibile in `configs/presets/`
-- almeno un runtime cloud disponibile in `configs/runtime/`
+- configuratore disponibile: `tools/cloud/cloud_configurator.py`
 
-La scelta iniziale piu' semplice e' partire da uno qualunque dei file in `configs/presets/` e usare un runtime cloud come `configs/runtime/colab-drive.yaml`.
+I preset (`configs/presets/dataset/` e `configs/presets/training/`) sono opzionali: puoi partire anche da configurazione manuale in tab `Generale`.
 
 ## Passo 1: genera la configurazione cloud
 
@@ -36,9 +35,9 @@ python tools/cloud/cloud_configurator.py
 
 Operazioni consigliate:
 
-1. scegli un preset sorgente
-2. scegli un runtime cloud
-3. verifica etichette, immagini di fuoco e parametri principali
+1. imposta `Ambiente = Cloud`
+2. verifica etichette, immagini di fuoco e parametri principali
+3. applica preset dataset/training se servono (opzionale)
 4. salva la configurazione finale
 
 Il configuratore aggiorna questi file:
@@ -46,7 +45,7 @@ Il configuratore aggiorna questi file:
 - `configs/generated/latest.cloud.yaml`
 - `configs/generated/latest.cloud.meta.yaml`
 
-Se selezioni un runtime locale, verra' aggiornato invece `latest.local.yaml`. Per il notebook cloud serve sempre `latest.cloud.yaml`.
+Se selezioni ambiente `Local`, verra' aggiornato invece `latest.local.yaml`. Per il notebook cloud serve sempre `latest.cloud.yaml`.
 
 ## Passo 2: crea il bundle cloud
 
@@ -179,9 +178,7 @@ Il modo piu' semplice per cambiarlo in modo stabile e' usare il configuratore:
 python tools/cloud/cloud_configurator.py
 ```
 
-Nel configuratore trovi il campo `Persistent root` nella sezione `Project + Dataset`.
-
-Per il flusso cloud conviene normalmente lasciarlo coerente con il runtime cloud, ad esempio con il runtime `configs/runtime/colab-drive.yaml`.
+Nel flusso attuale non devi impostarlo a mano nel configuratore: il notebook cloud sovrascrive automaticamente `project.persistent_root` in base all'ambiente Colab/Drive.
 
 
 ### Cosa trovi dentro `persistent_root`

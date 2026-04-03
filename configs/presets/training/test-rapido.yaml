@@ -1,0 +1,24 @@
+# Training preset: poche epoche per verificare che il pipeline funzioni.
+# Modello nano, 8 epoche, nessun resume — da usare con dataset test-rapido.
+training:
+  model_size: n
+  epochs: 8
+  batch_size: 16
+  image_size: 512
+  resume: never
+
+training_overrides:
+  patience: 4
+  learning_rate_init: 0.01
+  learning_rate_final: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+  rotation_degrees: 10
+  translate: 0.1
+  scale: 0.3
+  flip_vertical: 0.5
+  flip_horizontal: 0.5
+  mosaic: 0.5
+  mixed_precision: true
+  overwrite_existing: true
+  verbose: true

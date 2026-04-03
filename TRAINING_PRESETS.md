@@ -1,122 +1,78 @@
 # Training Presets
 
-Questo documento aiuta a scegliere il preset di training piu' adatto senza dover leggere ogni file YAML uno per uno.
+Il configuratore usa preset opzionali separati in due famiglie:
 
-Tutti i preset pronti all'uso si trovano in `configs/presets/`.
+- `configs/presets/dataset/`: controllano generazione dataset e trasformazioni
+- `configs/presets/training/`: controllano training e iperparametri principali
 
-## Come usare i preset
+I preset non sono obbligatori: puoi compilare tutto manualmente nella tab `Generale` e poi rifinire in `Avanzate`.
 
-Un preset e' una base di configurazione. Puoi eseguirlo direttamente con:
+## Come usare i preset nel configuratore
 
-```bash
-python run_experiment.py --config configs/presets/<nome-preset>.yaml
-```
+1. avvia `python tools/cloud/cloud_configurator.py`
+2. compila i campi base in `Generale`
+3. in `Presets` applica dataset/training preset se ti servono
+4. salva in `configs/generated/latest.local.yaml` o `configs/generated/latest.cloud.yaml`
 
-Se vuoi solo generare o riusare il dataset senza avviare il training:
+## Preset dataset disponibili
 
-```bash
-python run_experiment.py --config configs/presets/<nome-preset>.yaml --skip-training
-```
+### `configs/presets/dataset/test-rapido.yaml`
 
-Se preferisci un flusso guidato, usa il configuratore grafico. Il configuratore combina un preset con un runtime override e salva il risultato in `configs/generated/`.
+Dataset piccolo e veloce per test tecnici del pipeline.
 
-## Preset consigliato per iniziare
+### `configs/presets/dataset/standard.yaml`
 
-Per la maggior parte dei casi, il punto di partenza piu' semplice e affidabile e':
+Scelta bilanciata per iniziare in modo affidabile.
 
-```text
-configs/presets/balanced-mini-fires.yaml
-```
+### `configs/presets/dataset/ampio-vario.yaml`
 
-E' il preset consigliato per una prima prova seria perche':
+Maggiore varieta' di trasformazioni per migliorare robustezza generale.
 
-- usa due immagini di fuoco gia' pronte
-- mantiene il modello leggero
-- bilancia costo, tempo di addestramento e qualita' finale
+### `configs/presets/dataset/fuochi-piccoli.yaml`
 
-## Preset disponibili
+Tarato su fuochi piccoli/lontani e condizioni visive difficili.
 
-### `configs/presets/smoke.yaml`
+### `configs/presets/dataset/anti-falsi-positivi.yaml`
 
-Serve a verificare rapidamente che la pipeline funzioni da inizio a fine. E' il preset giusto per il primo test del progetto.
+Aumenta il peso dei negativi per ridurre falsi allarmi.
 
-### `configs/presets/baseline-lite.yaml`
+## Preset training disponibili
 
-E' una baseline locale leggera. E' utile quando vuoi una run semplice, con costo contenuto, adatta a CPU o a prove rapide.
+### `configs/presets/training/test-rapido.yaml`
 
-### `configs/presets/default.yaml`
+Poche epoche per verifiche rapide.
 
-E' una baseline generale da usare come riferimento stabile quando vuoi confrontare varianti diverse.
+### `configs/presets/training/standard.yaml`
 
-### `configs/presets/balanced-mini-fires.yaml`
+Bilanciato per uso generale.
 
-E' il preset consigliato per iniziare seriamente. Usa i file `base_fire_images/fire1-mini_nobg.png` e `base_fire_images/fire2-mini_nobg.png` e mantiene un buon compromesso tra leggerezza e qualita'.
+### `configs/presets/training/alta-recall.yaml`
 
-### `configs/presets/quick-screen.yaml`
+Favorisce la sensibilita' del detector (meno falsi negativi).
 
-Serve a capire rapidamente se una direzione sperimentale merita attenzione. E' utile per iterazioni brevi.
+### `configs/presets/training/addestramento-lungo.yaml`
 
-### `configs/presets/fast-debug.yaml`
+Piu' epoche per convergenza piu' stabile (costo maggiore).
 
-Riduce ulteriormente il costo per controlli tecnici sulla pipeline. E' pensato per debug e sviluppo, non per una valutazione finale della qualita'.
+### `configs/presets/training/modello-grande.yaml`
 
-### `configs/presets/recall.yaml`
+Usa un modello piu' capiente (`model_size: m`) con costo computazionale superiore.
 
-Da usare quando il modello perde troppi casi positivi. Punta a rendere il detector piu' sensibile.
+## Combinazioni consigliate rapide
 
-### `configs/presets/hard-negatives.yaml`
-
-Da usare quando il problema principale sono i falsi positivi. Introduce una pressione maggiore sui casi negativi difficili.
-
-### `configs/presets/small-fire.yaml`
-
-Da usare quando il fuoco da rilevare e' spesso piccolo o lontano nell'immagine.
-
-### `configs/presets/robust.yaml`
-
-Da usare quando il modello funziona bene solo in condizioni pulite ma peggiora con blur, rumore, occlusioni o cambi di colore.
-
-### `configs/presets/capacity.yaml`
-
-Da usare quando vuoi aumentare la capacita' del modello e hai piu' budget computazionale. E' il preset piu' costoso tra quelli principali.
-
-### `configs/presets/piazzola-light.yaml`
-
-E' una variante orientata allo scenario piazzola/light. Conviene usarla quando vuoi lavorare vicino a quel dominio specifico.
-
-## Scelta rapida in base all'obiettivo
-
-Se non sai quale preset scegliere, usa questa regola pratica:
-
-1. `balanced-mini-fires.yaml` per partire
-2. `recall.yaml` se perde troppo fuoco reale
-3. `hard-negatives.yaml` se segnala troppo spesso fuoco dove non c'e'
-4. `small-fire.yaml` se il fuoco appare piccolo o distante
-5. `robust.yaml` se il problema e' la fragilita' fuori da condizioni pulite
-6. `capacity.yaml` se vuoi piu' qualita' e puoi spendere piu' risorse
+1. Avvio consigliato: `dataset/standard` + `training/standard`
+2. Test tecnico veloce: `dataset/test-rapido` + `training/test-rapido`
+3. Fuochi piccoli: `dataset/fuochi-piccoli` + `training/alta-recall`
+4. Ridurre falsi positivi: `dataset/anti-falsi-positivi` + `training/modello-grande`
 
 ## Preset e flusso cloud
 
-Nel flusso cloud non selezioni il preset direttamente dal notebook.
+Nel flusso cloud i preset si scelgono sempre in locale nel configuratore, prima di creare il bundle.
 
-Il procedimento corretto e' questo:
+Procedura:
 
-1. scegli il preset in locale
-2. combina il preset con un runtime cloud usando `tools/cloud/cloud_configurator.py`
-3. genera `configs/generated/latest.cloud.yaml`
-4. crea il bundle cloud
-5. apri il notebook e avvia le celle
-
-## Quando usare il configuratore grafico
-
-Il configuratore e' consigliato se vuoi:
-
-- cambiare il runtime senza modificare a mano i file YAML
-- produrre una config finale pronta in `configs/generated/`
-- salvare sia una configurazione locale sia una cloud con percorso coerente
-
-Comando:
-
-```bash
-python tools/cloud/cloud_configurator.py
-```
+1. `Ambiente = Cloud` nel configuratore
+2. preset opzionali (dataset/training)
+3. salva `configs/generated/latest.cloud.yaml`
+4. esegui `python tools/cloud/prepare_cloud_bundle.py`
+5. avvia `cloud_train.ipynb`

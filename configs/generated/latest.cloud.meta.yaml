@@ -1,8 +1,0 @@
-schema_version: 2
-saved_at: '2026-04-02T17:39:12.703857+00:00'
-source_config: presets/balanced-mini-fires.yaml
-runtime_config: runtime/colab-drive.yaml
-saved_config: generated/fires-no-bg--colab-drive.yaml
-latest_config: generated/latest.cloud.yaml
-latest_kind: cloud
-app_version: 2026.04.02.4

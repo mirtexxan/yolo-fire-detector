@@ -1,0 +1,25 @@
+# Training preset: ottimizzato per minimizzare i falsi negativi (massima recall).
+# Piu' epoche, LR decrescente, augmentazioni piu' aggressive.
+# Utile con dataset fuochi-piccoli o anti-falsi-positivi.
+training:
+  model_size: n
+  epochs: 80
+  batch_size: 16
+  image_size: 640
+  resume: auto
+
+training_overrides:
+  patience: 20
+  learning_rate_init: 0.005
+  learning_rate_final: 0.0005
+  momentum: 0.95
+  weight_decay: 0.0003
+  rotation_degrees: 20
+  translate: 0.12
+  scale: 0.6
+  flip_vertical: 0.5
+  flip_horizontal: 0.5
+  mosaic: 0.9
+  mixed_precision: true
+  overwrite_existing: true
+  verbose: true

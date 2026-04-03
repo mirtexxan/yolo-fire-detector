@@ -1,0 +1,25 @@
+# Training preset: modello medium — piu' capacita', più lento da addestrare.
+# Ideale su GPU con almeno 8GB VRAM. Batch size ridotto per contenere la memoria.
+# Da usare con dataset ampio (ampio-vario o anti-falsi-positivi).
+training:
+  model_size: m
+  epochs: 100
+  batch_size: 8
+  image_size: 736
+  resume: auto
+
+training_overrides:
+  patience: 24
+  learning_rate_init: 0.003
+  learning_rate_final: 0.0003
+  momentum: 0.937
+  weight_decay: 0.0005
+  rotation_degrees: 12
+  translate: 0.08
+  scale: 0.4
+  flip_vertical: 0.5
+  flip_horizontal: 0.5
+  mosaic: 0.6
+  mixed_precision: true
+  overwrite_existing: true
+  verbose: true

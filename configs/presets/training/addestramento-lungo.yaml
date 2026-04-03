@@ -1,0 +1,24 @@
+# Training preset: addestramento lungo e stabile, massima accuratezza finale.
+# 150 epoche con patience alta, LR conservativo — richiede piu' tempo su GPU.
+training:
+  model_size: n
+  epochs: 150
+  batch_size: 16
+  image_size: 640
+  resume: auto
+
+training_overrides:
+  patience: 30
+  learning_rate_init: 0.006
+  learning_rate_final: 0.0005
+  momentum: 0.94
+  weight_decay: 0.0006
+  rotation_degrees: 18
+  translate: 0.12
+  scale: 0.55
+  flip_vertical: 0.5
+  flip_horizontal: 0.5
+  mosaic: 1.0
+  mixed_precision: true
+  overwrite_existing: true
+  verbose: true

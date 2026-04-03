@@ -7,6 +7,12 @@ wandb/
 detections/
 dist/
 
+# Config generate localmente (non condividere — si rigenerano dal configuratore)
+configs/generated/
+
+# Modello YOLO base (viene riscaricato automaticamente se assente)
+*.pt
+
 # Notebook e file temporanei
 .ipynb_checkpoints/
 configs/*.runtime.yaml

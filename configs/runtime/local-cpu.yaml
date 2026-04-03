@@ -1,6 +1,0 @@
-project:
-  persistent_root: artifacts/local
-
-training:
-  device: cpu
-  require_gpu: false

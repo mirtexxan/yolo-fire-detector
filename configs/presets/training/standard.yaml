@@ -1,0 +1,24 @@
+# Training preset: configurazione bilanciata di riferimento.
+# Modello nano, 50 epoche — buon punto di partenza per la maggior parte dei casi.
+training:
+  model_size: n
+  epochs: 50
+  batch_size: 16
+  image_size: 640
+  resume: auto
+
+training_overrides:
+  patience: 12
+  learning_rate_init: 0.01
+  learning_rate_final: 0.001
+  momentum: 0.937
+  weight_decay: 0.0005
+  rotation_degrees: 15
+  translate: 0.1
+  scale: 0.5
+  flip_vertical: 0.5
+  flip_horizontal: 0.5
+  mosaic: 1.0
+  mixed_precision: true
+  overwrite_existing: true
+  verbose: true
