@@ -16,7 +16,11 @@ from typing import Any
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+# Include readonly scope so folder discovery is not limited to app-created files only.
+DRIVE_SCOPES = [
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive.file",
+]
 DEFAULT_OAUTH_CREDENTIALS_FILE = "tools/model_registry/oauth_credentials.local.json"
 ALL_RUN_LABEL_SELECTOR = "all"
 ALL_RECURSIVE_RUN_LABEL_SELECTOR = "all-r"
@@ -319,6 +323,10 @@ def build_drive_service(
     elif token_path is not None and token_path.exists():
         creds = Credentials.from_authorized_user_file(str(token_path), DRIVE_SCOPES)
 
+    # If cached token was granted with narrower scopes, trigger a new OAuth consent.
+    if creds and not creds.has_scopes(DRIVE_SCOPES):
+        creds = None
+
     client_config = parse_client_config_from_bundle(bundle)
     if client_config is None and client_secrets_path is not None and client_secrets_path.exists():
         client_config = read_json(client_secrets_path)
@@ -403,6 +411,84 @@ def ensure_drive_folder(service, *, name: str, parent_id: str) -> str:
     metadata = {"name": name, "mimeType": folder_mime, "parents": [parent_id]}
     created = service.files().create(body=metadata, fields="id").execute()
     return str(created["id"])
+
+
+def _resolve_drive_child_folder_id(service, *, parent_id: str, selector: str) -> str:
+    """Resolve a single Drive folder name under a specific parent.
+
+    Matching order:
+    1. exact case-sensitive name
+    2. exact case-insensitive name
+    3. prefix startswith (case-insensitive)
+    4. contains substring (case-insensitive)
+    """
+    raw_selector = selector.strip()
+    if not raw_selector:
+        raise ValueError("Selector cartella vuoto")
+
+    exact_id = find_drive_file_id(
+        service,
+        name=raw_selector,
+        parent_id=parent_id,
+        mime_type="application/vnd.google-apps.folder",
+    )
+    if exact_id:
+        return exact_id
+
+    folders = list_drive_files(
+        service,
+        parent_id=parent_id,
+        mime_type="application/vnd.google-apps.folder",
+    )
+    if not folders:
+        raise FileNotFoundError(f"Nessuna sottocartella trovata sotto parent '{parent_id}'")
+
+    normalized = raw_selector.lower()
+
+    exact_ci = [item for item in folders if str(item.get("name") or "").strip().lower() == normalized]
+    if len(exact_ci) == 1:
+        return str(exact_ci[0]["id"])
+    if len(exact_ci) > 1:
+        names = ", ".join(sorted(str(item.get("name") or "") for item in exact_ci))
+        raise ValueError(f"Selector '{selector}' ambiguo (exact CI): {names}")
+
+    prefix = [item for item in folders if str(item.get("name") or "").strip().lower().startswith(normalized)]
+    if len(prefix) == 1:
+        return str(prefix[0]["id"])
+    if len(prefix) > 1:
+        names = ", ".join(sorted(str(item.get("name") or "") for item in prefix)[:12])
+        raise ValueError(f"Selector '{selector}' ambiguo (prefix): {names}")
+
+    contains = [item for item in folders if normalized in str(item.get("name") or "").strip().lower()]
+    if len(contains) == 1:
+        return str(contains[0]["id"])
+    if len(contains) > 1:
+        names = ", ".join(sorted(str(item.get("name") or "") for item in contains)[:12])
+        raise ValueError(f"Selector '{selector}' ambiguo (contains): {names}")
+
+    available = ", ".join(sorted(str(item.get("name") or "") for item in folders)[:20])
+    raise FileNotFoundError(
+        f"Cartella Drive non trovata: {selector}. Cartelle disponibili sotto parent '{parent_id}': {available}"
+    )
+
+
+def resolve_drive_folder_id_by_selector(service, *, parent_id: str, selector: str) -> str:
+    """Resolve a Drive folder selector, supporting nested paths like a/b/c."""
+    raw_selector = selector.strip().strip("/")
+    if not raw_selector:
+        raise ValueError("Registry selector vuoto")
+
+    if "/" in raw_selector:
+        current_parent = parent_id
+        for segment in [chunk.strip() for chunk in raw_selector.split("/") if chunk.strip()]:
+            current_parent = _resolve_drive_child_folder_id(
+                service,
+                parent_id=current_parent,
+                selector=segment,
+            )
+        return current_parent
+
+    return _resolve_drive_child_folder_id(service, parent_id=parent_id, selector=raw_selector)
 
 
 def upload_drive_file(service, *, parent_id: str, source_path: Path, target_name: str) -> str:
@@ -493,6 +579,64 @@ def list_registry_entries(registry_root: Path) -> list[dict[str, str]]:
     if not entries:
         raise FileNotFoundError(f"No importable runs found in registry: {models_root}")
     return entries
+
+
+def list_flat_exports_entries(registry_root: Path) -> list[dict[str, str]]:
+    """List importable entries from cloud layout: registry_root/exports/*.pt (+ optional .yaml)."""
+    exports_root = registry_root / "exports"
+    if not exports_root.exists():
+        raise FileNotFoundError(f"Missing exports folder in registry: {exports_root}")
+
+    entries: list[dict[str, str]] = []
+    for model_path in sorted(exports_root.glob("*.pt")):
+        if not model_path.is_file():
+            continue
+        metadata_path = model_path.with_suffix(".yaml")
+        entries.append(
+            {
+                "run_label": model_path.stem,
+                "model_filename": model_path.name,
+                "metadata_filename": metadata_path.name if metadata_path.exists() and metadata_path.is_file() else "",
+            }
+        )
+
+    if not entries:
+        raise FileNotFoundError(f"No importable .pt models found in exports: {exports_root}")
+    return entries
+
+
+def resolve_flat_exports_entries_by_selector(selector: str, registry_root: Path) -> list[dict[str, str]]:
+    """Resolve entries in flat exports layout by exact run/model name, then prefix startswith."""
+    normalized = selector.strip().lower()
+    if not normalized:
+        return []
+
+    entries = list_flat_exports_entries(registry_root)
+    exact_matches = [
+        entry
+        for entry in entries
+        if entry["run_label"].lower() == normalized
+        or entry["model_filename"].lower() == normalized
+        or Path(entry["model_filename"]).stem.lower() == normalized
+    ]
+    if exact_matches:
+        return exact_matches
+
+    prefixes = {normalized}
+    if normalized.endswith(".pt"):
+        prefixes.add(normalized[:-3])
+    else:
+        prefixes.add(f"{normalized}.pt")
+
+    return [
+        entry
+        for entry in entries
+        if any(
+            entry["model_filename"].lower().startswith(prefix)
+            or Path(entry["model_filename"]).stem.lower().startswith(prefix.rstrip("."))
+            for prefix in prefixes
+        )
+    ]
 
 
 def resolve_registry_run_labels_by_selector(selector: str, registry_root: Path) -> list[str]:
@@ -588,6 +732,64 @@ def list_drive_registry_entries(service, *, models_id: str) -> list[dict[str, st
     return entries
 
 
+def list_drive_flat_exports_entries(service, *, exports_id: str) -> list[dict[str, str]]:
+    """List importable entries from drive cloud layout: exports/*.pt (+ optional .yaml)."""
+    files = list_drive_files(service, parent_id=exports_id)
+    by_name = {str(item.get("name") or ""): item for item in files}
+
+    entries: list[dict[str, str]] = []
+    for item in files:
+        model_filename = str(item.get("name") or "").strip()
+        if not model_filename.lower().endswith(".pt"):
+            continue
+        metadata_name = f"{Path(model_filename).stem}.yaml"
+        entries.append(
+            {
+                "run_label": Path(model_filename).stem,
+                "model_filename": model_filename,
+                "metadata_filename": metadata_name if metadata_name in by_name else "",
+            }
+        )
+
+    if not entries:
+        raise FileNotFoundError("No importable .pt files found in drive exports folder")
+    return entries
+
+
+def resolve_drive_flat_exports_entries_by_selector(service, *, exports_id: str, selector: str) -> list[dict[str, str]]:
+    """Resolve entries in drive flat exports layout by exact run/model name, then prefix startswith."""
+    normalized = selector.strip().lower()
+    if not normalized:
+        return []
+
+    entries = list_drive_flat_exports_entries(service, exports_id=exports_id)
+    exact_matches = [
+        entry
+        for entry in entries
+        if entry["run_label"].lower() == normalized
+        or entry["model_filename"].lower() == normalized
+        or Path(entry["model_filename"]).stem.lower() == normalized
+    ]
+    if exact_matches:
+        return exact_matches
+
+    prefixes = {normalized}
+    if normalized.endswith(".pt"):
+        prefixes.add(normalized[:-3])
+    else:
+        prefixes.add(f"{normalized}.pt")
+
+    return [
+        entry
+        for entry in entries
+        if any(
+            entry["model_filename"].lower().startswith(prefix)
+            or Path(entry["model_filename"]).stem.lower().startswith(prefix.rstrip("."))
+            for prefix in prefixes
+        )
+    ]
+
+
 def resolve_drive_registry_run_labels_by_selector(service, *, registry_id: str, models_id: str, selector: str) -> list[str]:
     normalized = selector.strip().lower()
     if not normalized:
@@ -662,6 +864,8 @@ def choose_local_artifacts(
         if metadata_candidate.exists() and metadata_candidate.is_file():
             metadata_path = metadata_candidate
         return run_label_model_path, metadata_path, run_label_model_path.stem
+
+    version_dir: Path | None = None
 
     if run_label_arg:
         prefix_matches = select_local_artifacts_by_prefix(run_label_arg, local_persistent_root)
@@ -844,7 +1048,14 @@ def export_to_drive_oauth(
     if metadata_path is not None and not metadata_path.exists():
         raise FileNotFoundError(f"Metadata not found: {metadata_path}")
 
-    registry_id = ensure_drive_folder(service, name=registry_name, parent_id=drive_parent_id)
+    try:
+        registry_id = resolve_drive_folder_id_by_selector(
+            service,
+            parent_id=drive_parent_id,
+            selector=registry_name,
+        )
+    except FileNotFoundError:
+        registry_id = ensure_drive_folder(service, name=registry_name, parent_id=drive_parent_id)
     models_id = ensure_drive_folder(service, name="models", parent_id=registry_id)
     run_dir_id = ensure_drive_folder(service, name=run_label, parent_id=models_id)
 
@@ -897,7 +1108,25 @@ def import_from_drive(
     if not registry_root.exists():
         raise FileNotFoundError(f"Drive registry folder not found: {registry_root}")
 
+    models_root = registry_root / "models"
+    flat_exports_root = registry_root / "exports"
+    use_flat_exports_layout = not models_root.exists() and flat_exports_root.exists()
+    version_dir: Path | None = None
+
     if is_bulk_run_selector(run_label_arg):
+        if use_flat_exports_layout:
+            entries = list_flat_exports_entries(registry_root)
+            print(f"Importing {len(entries)} export file(s) from flat registry layout {registry_name}")
+            for entry in entries:
+                import_from_drive(
+                    drive_root=drive_root,
+                    registry_name=registry_name,
+                    target_persistent_root=target_persistent_root,
+                    run_label_arg=entry["run_label"],
+                    overwrite=overwrite,
+                )
+            return
+
         run_labels = ordered_registry_run_labels(registry_root)
         print(f"Importing {len(run_labels)} run(s) from registry {registry_name}")
         for run_label in run_labels:
@@ -910,48 +1139,96 @@ def import_from_drive(
             )
         return
 
-    if run_label_arg:
-        matching_run_labels = resolve_registry_run_labels_by_selector(run_label_arg, registry_root)
-        if matching_run_labels:
-            if len(matching_run_labels) > 1:
-                print(f"Selector '{run_label_arg}' matched {len(matching_run_labels)} run(s) in registry {registry_name}")
-                for run_label in matching_run_labels:
-                    import_from_drive(
-                        drive_root=drive_root,
-                        registry_name=registry_name,
-                        target_persistent_root=target_persistent_root,
-                        run_label_arg=run_label,
-                        overwrite=overwrite,
+    if use_flat_exports_layout:
+        if run_label_arg:
+            matching_entries = resolve_flat_exports_entries_by_selector(run_label_arg, registry_root)
+            if matching_entries:
+                if len(matching_entries) > 1:
+                    print(
+                        f"Selector '{run_label_arg}' matched {len(matching_entries)} export file(s) in flat registry {registry_name}"
                     )
-                return
-            run_label = matching_run_labels[0]
+                    for entry in matching_entries:
+                        import_from_drive(
+                            drive_root=drive_root,
+                            registry_name=registry_name,
+                            target_persistent_root=target_persistent_root,
+                            run_label_arg=entry["run_label"],
+                            overwrite=overwrite,
+                        )
+                    return
+                selected = matching_entries[0]
+            else:
+                raise FileNotFoundError(
+                    f"No matching model for selector '{run_label_arg}' in flat exports registry: {flat_exports_root}"
+                )
         else:
-            run_label = run_label_arg
+            latest_path = registry_root / "latest.yaml"
+            if latest_path.exists():
+                latest = read_yaml(latest_path)
+                model_ref = str(latest.get("model_path") or "").strip()
+                if not model_ref:
+                    raise ValueError("latest.yaml does not contain model_path")
+                model_filename = Path(model_ref).name
+                selected = {
+                    "run_label": str(latest.get("run_label") or Path(model_filename).stem),
+                    "model_filename": model_filename,
+                    "metadata_filename": Path(str(latest.get("metadata_path") or "")).name,
+                }
+            else:
+                entries = list_flat_exports_entries(registry_root)
+                selected = entries[-1]
+
+        run_label = str(selected["run_label"])
+        model_filename = str(selected["model_filename"])
+        metadata_filename = str(selected.get("metadata_filename") or "")
+        source_model = flat_exports_root / model_filename
+        if not source_model.exists():
+            raise FileNotFoundError(f"Model file not found in flat exports: {source_model}")
+
+        actual_sha = sha256_of_file(source_model)
     else:
-        latest = read_yaml(registry_root / "latest.yaml")
-        run_label = str(latest.get("run_label") or "").strip()
-        if not run_label:
-            raise ValueError("latest.yaml does not contain run_label")
+        if run_label_arg:
+            matching_run_labels = resolve_registry_run_labels_by_selector(run_label_arg, registry_root)
+            if matching_run_labels:
+                if len(matching_run_labels) > 1:
+                    print(f"Selector '{run_label_arg}' matched {len(matching_run_labels)} run(s) in registry {registry_name}")
+                    for run_label in matching_run_labels:
+                        import_from_drive(
+                            drive_root=drive_root,
+                            registry_name=registry_name,
+                            target_persistent_root=target_persistent_root,
+                            run_label_arg=run_label,
+                            overwrite=overwrite,
+                        )
+                    return
+                run_label = matching_run_labels[0]
+            else:
+                run_label = run_label_arg
+        else:
+            latest = read_yaml(registry_root / "latest.yaml")
+            run_label = str(latest.get("run_label") or "").strip()
+            if not run_label:
+                raise ValueError("latest.yaml does not contain run_label")
 
-    version_dir = registry_root / "models" / run_label
-    manifest_path = version_dir / "model_manifest.yaml"
-    if not manifest_path.exists():
-        raise FileNotFoundError(f"Missing model manifest: {manifest_path}")
+        version_dir = registry_root / "models" / run_label
+        manifest_path = version_dir / "model_manifest.yaml"
+        if not manifest_path.exists():
+            raise FileNotFoundError(f"Missing model manifest: {manifest_path}")
 
-    manifest = read_yaml(manifest_path)
-    model_filename = str(manifest.get("model_filename") or "").strip()
-    metadata_filename = str(manifest.get("metadata_filename") or "").strip()
-    expected_sha = str(manifest.get("model_sha256") or "").strip()
-    if not model_filename:
-        raise ValueError(f"Invalid model_filename in {manifest_path}")
+        manifest = read_yaml(manifest_path)
+        model_filename = str(manifest.get("model_filename") or "").strip()
+        metadata_filename = str(manifest.get("metadata_filename") or "").strip()
+        expected_sha = str(manifest.get("model_sha256") or "").strip()
+        if not model_filename:
+            raise ValueError(f"Invalid model_filename in {manifest_path}")
 
-    source_model = version_dir / model_filename
-    if not source_model.exists():
-        raise FileNotFoundError(f"Model file not found on drive: {source_model}")
+        source_model = version_dir / model_filename
+        if not source_model.exists():
+            raise FileNotFoundError(f"Model file not found on drive: {source_model}")
 
-    actual_sha = sha256_of_file(source_model)
-    if expected_sha and actual_sha != expected_sha:
-        raise ValueError(f"SHA256 mismatch for {source_model}. expected={expected_sha} actual={actual_sha}")
+        actual_sha = sha256_of_file(source_model)
+        if expected_sha and actual_sha != expected_sha:
+            raise ValueError(f"SHA256 mismatch for {source_model}. expected={expected_sha} actual={actual_sha}")
 
     target_root = target_persistent_root
     target_root.mkdir(parents=True, exist_ok=True)
@@ -963,7 +1240,11 @@ def import_from_drive(
 
     target_metadata: Path | None = None
     if metadata_filename:
-        source_metadata = version_dir / metadata_filename
+        if use_flat_exports_layout:
+            source_metadata = flat_exports_root / metadata_filename
+        else:
+            assert version_dir is not None
+            source_metadata = version_dir / metadata_filename
         if source_metadata.exists():
             target_metadata = resolve_import_target_path(target_root / metadata_filename, overwrite, import_suffix)
             shutil.copy2(source_metadata, target_metadata)
@@ -994,14 +1275,11 @@ def import_from_drive_oauth(
     run_label_arg: str | None,
     overwrite: bool,
 ) -> None:
-    registry_id = find_drive_file_id(
+    registry_id = resolve_drive_folder_id_by_selector(
         service,
-        name=registry_name,
         parent_id=drive_parent_id,
-        mime_type="application/vnd.google-apps.folder",
+        selector=registry_name,
     )
-    if not registry_id:
-        raise FileNotFoundError(f"Drive registry folder not found: {registry_name}")
 
     models_id = find_drive_file_id(
         service,
@@ -1009,11 +1287,34 @@ def import_from_drive_oauth(
         parent_id=registry_id,
         mime_type="application/vnd.google-apps.folder",
     )
-    if not models_id:
-        raise FileNotFoundError("models folder not found in drive registry")
+    exports_id = find_drive_file_id(
+        service,
+        name="exports",
+        parent_id=registry_id,
+        mime_type="application/vnd.google-apps.folder",
+    )
+    use_flat_exports_layout = not models_id and bool(exports_id)
+    if not models_id and not use_flat_exports_layout:
+        raise FileNotFoundError("Neither models nor exports folder found in drive registry")
+    models_id_str = str(models_id) if models_id is not None else ""
 
     if is_bulk_run_selector(run_label_arg):
-        run_labels = ordered_drive_registry_run_labels(service, registry_id=registry_id, models_id=models_id)
+        if use_flat_exports_layout:
+            assert exports_id is not None
+            entries = list_drive_flat_exports_entries(service, exports_id=exports_id)
+            print(f"Importing {len(entries)} export file(s) from flat drive registry {registry_name}")
+            for entry in entries:
+                import_from_drive_oauth(
+                    service=service,
+                    drive_parent_id=drive_parent_id,
+                    registry_name=registry_name,
+                    target_persistent_root=target_persistent_root,
+                    run_label_arg=entry["run_label"],
+                    overwrite=overwrite,
+                )
+            return
+
+        run_labels = ordered_drive_registry_run_labels(service, registry_id=registry_id, models_id=models_id_str)
         print(f"Importing {len(run_labels)} run(s) from drive registry {registry_name}")
         for run_label in run_labels:
             import_from_drive_oauth(
@@ -1026,61 +1327,116 @@ def import_from_drive_oauth(
             )
         return
 
-    if run_label_arg:
-        matching_run_labels = resolve_drive_registry_run_labels_by_selector(
-            service,
-            registry_id=registry_id,
-            models_id=models_id,
-            selector=run_label_arg,
-        )
-        if matching_run_labels:
-            if len(matching_run_labels) > 1:
-                print(f"Selector '{run_label_arg}' matched {len(matching_run_labels)} run(s) in drive registry {registry_name}")
-                for run_label in matching_run_labels:
-                    import_from_drive_oauth(
-                        service=service,
-                        drive_parent_id=drive_parent_id,
-                        registry_name=registry_name,
-                        target_persistent_root=target_persistent_root,
-                        run_label_arg=run_label,
-                        overwrite=overwrite,
+    if use_flat_exports_layout:
+        assert exports_id is not None
+        if run_label_arg:
+            matching_entries = resolve_drive_flat_exports_entries_by_selector(
+                service,
+                exports_id=exports_id,
+                selector=run_label_arg,
+            )
+            if matching_entries:
+                if len(matching_entries) > 1:
+                    print(
+                        f"Selector '{run_label_arg}' matched {len(matching_entries)} export file(s) in flat drive registry {registry_name}"
                     )
-                return
-            run_label = matching_run_labels[0]
+                    for entry in matching_entries:
+                        import_from_drive_oauth(
+                            service=service,
+                            drive_parent_id=drive_parent_id,
+                            registry_name=registry_name,
+                            target_persistent_root=target_persistent_root,
+                            run_label_arg=entry["run_label"],
+                            overwrite=overwrite,
+                        )
+                    return
+                selected = matching_entries[0]
+            else:
+                raise FileNotFoundError(
+                    f"No matching model for selector '{run_label_arg}' in flat drive exports for registry {registry_name}"
+                )
         else:
-            run_label = run_label_arg
+            latest_id = find_drive_file_id(service, name="latest.yaml", parent_id=registry_id)
+            if latest_id:
+                latest = yaml.safe_load(read_drive_text(service, file_id=latest_id)) or {}
+                model_ref = str(latest.get("model_path") or "").strip()
+                if not model_ref:
+                    raise ValueError("latest.yaml does not contain model_path")
+                model_filename = Path(model_ref).name
+                selected = {
+                    "run_label": str(latest.get("run_label") or Path(model_filename).stem),
+                    "model_filename": model_filename,
+                    "metadata_filename": Path(str(latest.get("metadata_path") or "")).name,
+                }
+            else:
+                entries = list_drive_flat_exports_entries(service, exports_id=exports_id)
+                selected = entries[-1]
+
+        run_label = str(selected["run_label"])
+        model_filename = str(selected["model_filename"])
+        metadata_filename = str(selected.get("metadata_filename") or "")
+        expected_sha = ""
+
+        model_id = find_drive_file_id(service, name=model_filename, parent_id=exports_id)
+        if not model_id:
+            raise FileNotFoundError(f"Model file not found in drive flat exports for run {run_label}: {model_filename}")
     else:
-        latest_id = find_drive_file_id(service, name="latest.yaml", parent_id=registry_id)
-        if not latest_id:
-            raise FileNotFoundError("latest.yaml not found in drive registry")
-        latest = yaml.safe_load(read_drive_text(service, file_id=latest_id)) or {}
-        run_label = str(latest.get("run_label") or "").strip()
-        if not run_label:
-            raise ValueError("latest.yaml does not contain run_label")
+        if run_label_arg:
+            matching_run_labels = resolve_drive_registry_run_labels_by_selector(
+                service,
+                registry_id=registry_id,
+                models_id=models_id_str,
+                selector=run_label_arg,
+            )
+            if matching_run_labels:
+                if len(matching_run_labels) > 1:
+                    print(f"Selector '{run_label_arg}' matched {len(matching_run_labels)} run(s) in drive registry {registry_name}")
+                    for run_label in matching_run_labels:
+                        import_from_drive_oauth(
+                            service=service,
+                            drive_parent_id=drive_parent_id,
+                            registry_name=registry_name,
+                            target_persistent_root=target_persistent_root,
+                            run_label_arg=run_label,
+                            overwrite=overwrite,
+                        )
+                    return
+                run_label = matching_run_labels[0]
+            else:
+                run_label = run_label_arg
+        else:
+            latest_id = find_drive_file_id(service, name="latest.yaml", parent_id=registry_id)
+            if not latest_id:
+                raise FileNotFoundError("latest.yaml not found in drive registry")
+            latest = yaml.safe_load(read_drive_text(service, file_id=latest_id)) or {}
+            run_label = str(latest.get("run_label") or "").strip()
+            if not run_label:
+                raise ValueError("latest.yaml does not contain run_label")
 
-    run_dir_id = find_drive_file_id(
-        service,
-        name=run_label,
-        parent_id=models_id,
-        mime_type="application/vnd.google-apps.folder",
-    )
-    if not run_dir_id:
-        raise FileNotFoundError(f"Run folder not found in drive registry: {run_label}")
+        run_dir_id = find_drive_file_id(
+            service,
+            name=run_label,
+            parent_id=models_id_str,
+            mime_type="application/vnd.google-apps.folder",
+        )
+        if not run_dir_id:
+            raise FileNotFoundError(f"Run folder not found in drive registry: {run_label}")
+        run_dir_id_str = str(run_dir_id)
 
-    manifest_id = find_drive_file_id(service, name="model_manifest.yaml", parent_id=run_dir_id)
-    if not manifest_id:
-        raise FileNotFoundError(f"model_manifest.yaml not found for run: {run_label}")
+        manifest_id = find_drive_file_id(service, name="model_manifest.yaml", parent_id=run_dir_id_str)
+        if not manifest_id:
+            raise FileNotFoundError(f"model_manifest.yaml not found for run: {run_label}")
 
-    manifest = yaml.safe_load(read_drive_text(service, file_id=manifest_id)) or {}
-    model_filename = str(manifest.get("model_filename") or "").strip()
-    metadata_filename = str(manifest.get("metadata_filename") or "").strip()
-    expected_sha = str(manifest.get("model_sha256") or "").strip()
-    if not model_filename:
-        raise ValueError("Invalid model_filename in model_manifest.yaml")
+        manifest = yaml.safe_load(read_drive_text(service, file_id=manifest_id)) or {}
+        model_filename = str(manifest.get("model_filename") or "").strip()
+        metadata_filename = str(manifest.get("metadata_filename") or "").strip()
+        expected_sha = str(manifest.get("model_sha256") or "").strip()
+        if not model_filename:
+            raise ValueError("Invalid model_filename in model_manifest.yaml")
 
-    model_id = find_drive_file_id(service, name=model_filename, parent_id=run_dir_id)
-    if not model_id:
-        raise FileNotFoundError(f"Model file not found on drive for run {run_label}: {model_filename}")
+        model_id = find_drive_file_id(service, name=model_filename, parent_id=run_dir_id_str)
+        if not model_id:
+            raise FileNotFoundError(f"Model file not found on drive for run {run_label}: {model_filename}")
 
     target_root = target_persistent_root
     target_root.mkdir(parents=True, exist_ok=True)
@@ -1098,7 +1454,12 @@ def import_from_drive_oauth(
 
     target_metadata: Path | None = None
     if metadata_filename:
-        metadata_id = find_drive_file_id(service, name=metadata_filename, parent_id=run_dir_id)
+        if use_flat_exports_layout:
+            assert exports_id is not None
+            metadata_parent_id = exports_id
+        else:
+            metadata_parent_id = run_dir_id_str
+        metadata_id = find_drive_file_id(service, name=metadata_filename, parent_id=metadata_parent_id)
         if metadata_id:
             target_metadata = resolve_import_target_path(target_root / metadata_filename, overwrite, import_suffix)
             download_drive_file(service, file_id=metadata_id, target_path=target_metadata)
