@@ -1,0 +1,27 @@
+# Dataset preset: configurazione bilanciata di riferimento.
+# 2000 immagini, 640px, augmentazioni moderate. Buon punto di partenza.
+# Non include le immagini di base (selezionate nel configuratore).
+dataset:
+  num_images: 2000
+  image_size: 640
+  negative_ratio: 0.35
+  train_split: 0.8
+  seed: 42
+  force_regenerate: false
+
+dataset_settings_overrides:
+  fire_scale_min: 0.05
+  fire_scale_max: 0.5
+
+image_transform_overrides:
+  rotation_deg_min: -180
+  rotation_deg_max: 180
+  perspective_shift: 120
+  enable_color_shift: true
+  color_shift_prob: 0.35
+  motion_blur_prob: 0.25
+  gaussian_blur_prob: 0.15
+  noise_prob: 0.15
+  shadow_prob: 0.35
+  occlusion_prob: 0.2
+  augment_negative_backgrounds: true

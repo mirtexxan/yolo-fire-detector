@@ -1,9 +1,5 @@
 # Dati e artefatti locali
-dataset/
 artifacts/
-fire_detector_runs/
-runs/
-wandb/
 detections/
 dist/
 

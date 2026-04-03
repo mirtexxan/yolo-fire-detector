@@ -1,0 +1,28 @@
+# Dataset preset: dataset ampio con alta varieta' di condizioni.
+# 3000 immagini, rotazioni e prospettive accentuate, fuochi di dimensioni variate.
+# Consigliato quando si vuole un modello robusto a scene diverse.
+# Non include le immagini di base (selezionate nel configuratore).
+dataset:
+  num_images: 3000
+  image_size: 640
+  negative_ratio: 0.3
+  train_split: 0.8
+  seed: 44
+  force_regenerate: false
+
+dataset_settings_overrides:
+  fire_scale_min: 0.04
+  fire_scale_max: 0.55
+
+image_transform_overrides:
+  rotation_deg_min: -180
+  rotation_deg_max: 180
+  perspective_shift: 150
+  enable_color_shift: true
+  color_shift_prob: 0.5
+  motion_blur_prob: 0.4
+  gaussian_blur_prob: 0.3
+  noise_prob: 0.3
+  shadow_prob: 0.6
+  occlusion_prob: 0.4
+  augment_negative_backgrounds: true

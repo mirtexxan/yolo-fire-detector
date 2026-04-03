@@ -1,0 +1,28 @@
+# Dataset preset: molti negativi difficili per ridurre i falsi positivi.
+# 55% immagini senza fuoco, augmentazioni pesanti anche sui background negativi.
+# Usare quando il modello tende a segnalare fuoco dove non c'e'.
+# Non include le immagini di base (selezionate nel configuratore).
+dataset:
+  num_images: 5000
+  image_size: 640
+  negative_ratio: 0.55
+  train_split: 0.8
+  seed: 82
+  force_regenerate: false
+
+dataset_settings_overrides:
+  fire_scale_min: 0.04
+  fire_scale_max: 0.5
+
+image_transform_overrides:
+  rotation_deg_min: -180
+  rotation_deg_max: 180
+  perspective_shift: 130
+  enable_color_shift: true
+  color_shift_prob: 0.45
+  motion_blur_prob: 0.35
+  gaussian_blur_prob: 0.3
+  noise_prob: 0.35
+  shadow_prob: 0.55
+  occlusion_prob: 0.45
+  augment_negative_backgrounds: true

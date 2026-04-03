@@ -1,0 +1,26 @@
+# Dataset preset: dataset minimo per testare il pipeline velocemente.
+# 400 immagini, augmentazioni ridotte, force_regenerate attivo.
+# Non include le immagini di base (selezionate nel configuratore).
+dataset:
+  num_images: 400
+  image_size: 512
+  negative_ratio: 0.3
+  train_split: 0.8
+  seed: 42
+  force_regenerate: true
+
+dataset_settings_overrides:
+  fire_scale_min: 0.07
+  fire_scale_max: 0.4
+
+image_transform_overrides:
+  rotation_deg_min: -90
+  rotation_deg_max: 90
+  perspective_shift: 40
+  enable_color_shift: false
+  motion_blur_prob: 0.1
+  gaussian_blur_prob: 0.05
+  noise_prob: 0.05
+  shadow_prob: 0.1
+  occlusion_prob: 0.05
+  augment_negative_backgrounds: false
