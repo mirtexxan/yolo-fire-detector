@@ -85,11 +85,42 @@ def strip_notebook_outputs(notebook_path: Path) -> bytes:
     return json.dumps(payload, indent=1, ensure_ascii=False).encode("utf-8")
 
 
+def detect_latest_generated_dataset_dir(project_root: Path) -> Path | None:
+    """Return the latest generated dataset directory under artifacts/local/datasets/."""
+    datasets_root = project_root / "artifacts" / "local" / "datasets"
+    if not datasets_root.exists() or not datasets_root.is_dir():
+        return None
+
+    candidates: list[tuple[float, Path]] = []
+    for dataset_dir in datasets_root.iterdir():
+        if not dataset_dir.is_dir():
+            continue
+        manifest = dataset_dir / "dataset_manifest.yaml"
+        if not manifest.exists() or not manifest.is_file():
+            continue
+        candidates.append((manifest.stat().st_mtime, dataset_dir))
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda item: (item[0], item[1].name.lower()))
+    return candidates[-1][1]
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
 def create_bundle(
     project_root: Path,
     output_path: Path,
     include_dataset: bool,
     include_runs: bool,
+    include_latest_generated_dataset: bool,
     strip_notebook_output: bool,
 ) -> None:
     files_added = 0
@@ -100,11 +131,24 @@ def create_bundle(
             "Config cloud mancante: genera prima configs/generated/latest.cloud.yaml con il configuratore usando un runtime cloud."
         )
 
+    latest_dataset_dir: Path | None = None
+    if include_latest_generated_dataset:
+        latest_dataset_dir = detect_latest_generated_dataset_dir(project_root)
+        if latest_dataset_dir is None:
+            raise FileNotFoundError(
+                "Nessun dataset generato trovato in artifacts/local/datasets/. "
+                "Genera prima un dataset locale con --skip-training."
+            )
+
     with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for candidate in project_root.rglob("*"):
             if candidate.is_dir():
                 continue
             relative_path = candidate.relative_to(project_root)
+            if latest_dataset_dir is not None and _is_relative_to(candidate, latest_dataset_dir):
+                archive.write(candidate, arcname=relative_path.as_posix())
+                files_added += 1
+                continue
             if should_skip(relative_path, include_dataset, include_runs):
                 continue
             if not should_include(relative_path):
@@ -121,6 +165,8 @@ def create_bundle(
     print(f"Dimensione: {bundle_size_mb:.2f} MB")
     if default_launchable_config is not None:
         print(f"Config cloud inclusa nel bundle: {default_launchable_config}")
+    if latest_dataset_dir is not None:
+        print(f"Dataset locale incluso nel bundle: {latest_dataset_dir.relative_to(project_root).as_posix()}")
     print("Passo successivo: carica lo zip in Colab o in Google Drive.")
 
 
@@ -128,6 +174,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Prepara uno zip del progetto per notebook cloud")
     parser.add_argument("--output", type=str, default="dist/yolo-fire-detector-cloud.zip")
     parser.add_argument("--include-dataset", action="store_true", help="Includi anche la cartella dataset se gia' generata")
+    parser.add_argument(
+        "--include-latest-generated-dataset",
+        type=str,
+        choices=["true", "false"],
+        default="false",
+        help="Se true include nel bundle l'ultimo dataset in artifacts/local/datasets/",
+    )
     parser.add_argument("--include-runs", action="store_true", help="Includi checkpoint e risultati precedenti")
     parser.add_argument(
         "--keep-notebook-outputs",
@@ -143,6 +196,7 @@ def main() -> None:
         output_path,
         args.include_dataset,
         args.include_runs,
+        include_latest_generated_dataset=(args.include_latest_generated_dataset == "true"),
         strip_notebook_output=not args.keep_notebook_outputs,
     )
 

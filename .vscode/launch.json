@@ -43,7 +43,9 @@
       "cwd": "${workspaceFolder}",
       "args": [
         "--output",
-        "dist/yolo-fire-detector-cloud.zip"
+        "dist/yolo-fire-detector-cloud.zip",
+        "--include-latest-generated-dataset",
+        "${input:cloudBundleIncludeLatestGeneratedDataset}"
       ]
     },
     {
@@ -189,6 +191,16 @@
       "type": "promptString",
       "description": "Path del file YAML della pipeline da eseguire con --skip-training",
       "default": "${workspaceFolder}/configs/generated/latest.local.yaml"
+    },
+    {
+      "id": "cloudBundleIncludeLatestGeneratedDataset",
+      "type": "pickString",
+      "description": "Create Cloud Bundle: includere l'ultimo dataset locale generato nel file zip?",
+      "options": [
+        "true",
+        "false"
+      ],
+      "default": "true"
     },
     {
       "id": "detectWeightsPath",
