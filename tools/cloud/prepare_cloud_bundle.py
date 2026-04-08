@@ -18,12 +18,10 @@ from config_utils import LATEST_CLOUD_CONFIG_RELATIVE, choose_default_cloud_laun
 BUNDLED_CLOUD_CONFIG_RELATIVE = Path("configs") / LATEST_CLOUD_CONFIG_RELATIVE
 
 
-DEFAULT_EXCLUDES = {
+ROOT_LEVEL_EXCLUDES = {
     ".git",
     ".venv",
     ".vscode",
-    ".ipynb_checkpoints",
-    "__pycache__",
     "artifacts",
     "dataset",
     "detections",
@@ -32,6 +30,11 @@ DEFAULT_EXCLUDES = {
     "dist",
     "env",
     "venv",
+}
+
+ANYWHERE_EXCLUDES = {
+    ".ipynb_checkpoints",
+    "__pycache__",
 }
 
 DEFAULT_INCLUDE_NAMES = {
@@ -56,14 +59,18 @@ def detect_default_launchable_config(project_root: Path) -> str | None:
 
 
 def should_skip(path: Path, include_dataset: bool, include_runs: bool) -> bool:
-    parts = set(path.parts)
-    excludes = set(DEFAULT_EXCLUDES)
+    parts = path.parts
+    root_excludes = set(ROOT_LEVEL_EXCLUDES)
     if include_dataset:
-        excludes.discard("dataset")
+        root_excludes.discard("dataset")
     if include_runs:
-        excludes.discard("fire_detector_runs")
-        excludes.discard("runs")
-    return any(part in excludes for part in parts)
+        root_excludes.discard("fire_detector_runs")
+        root_excludes.discard("runs")
+
+    if any(part in ANYWHERE_EXCLUDES for part in parts):
+        return True
+
+    return bool(parts) and parts[0] in root_excludes
 
 
 def should_include(relative_path: Path) -> bool:

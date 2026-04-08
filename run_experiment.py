@@ -9,9 +9,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 import re
 import shutil
+import sys
 from typing import Any
 
 import yaml
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from config_utils import deep_merge, load_layered_config
 from generator import generate_dataset
@@ -20,8 +25,6 @@ from train import create_dataset_yaml, train_model
 from tools.dataset.collect_hard_negatives import collect_hard_negatives, _resolve_model as resolve_hn_model
 from tools.dataset.dataset_report import generate_dataset_report
 from tools.dataset.fetch_unsplash_backgrounds import fetch_backgrounds, load_unsplash_access_key
-
-PROJECT_ROOT = Path(__file__).resolve().parent
 
 
 def slugify(value: str) -> str:
