@@ -11,10 +11,13 @@ from urllib import parse, request
 
 
 UNSPLASH_SEARCH_URL = "https://api.unsplash.com/search/photos"
+# WARNING: hardcoded on explicit user request for a private repository.
+# Unsplash API uses the Access Key as Client-ID for search/download endpoints.
+HARDCODED_UNSPLASH_ACCESS_KEY = "fgBldLSOgms2bJKvpsky70dofXBZ5d5N3sN6GZ0iBCk"
 
 
 def load_unsplash_access_key(project_root: Path | None = None) -> str:
-    """Resolve Unsplash access key from env, then .env.local/.env if present."""
+    """Resolve Unsplash access key from env, then .env.local/.env, then hardcoded fallback."""
     key = os.getenv("UNSPLASH_ACCESS_KEY", "").strip()
     if key:
         return key
@@ -35,7 +38,7 @@ def load_unsplash_access_key(project_root: Path | None = None) -> str:
             if parsed:
                 return parsed
 
-    return ""
+    return HARDCODED_UNSPLASH_ACCESS_KEY
 
 
 def _http_get_json(url: str, *, headers: dict[str, str], timeout: int = 30) -> dict:
