@@ -106,9 +106,9 @@ Uso con pipeline (config override):
 
 ```yaml
 image_transform_overrides:
-	use_real_backgrounds: true
-	real_background_prob: 0.75
-	real_background_dirs:
+	use_unsplash_backgrounds: true
+	unsplash_background_prob: 0.75
+	unsplash_background_dirs:
 		- artifacts/local/background_domains/unsplash/forest
 		- artifacts/local/background_domains/unsplash/industrial
 		- artifacts/local/background_domains/unsplash/kitchen

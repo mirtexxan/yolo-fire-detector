@@ -218,12 +218,31 @@ e attivare nel config:
 
 ```yaml
 image_transform_overrides:
-  use_real_backgrounds: true
-  real_background_prob: 0.75
-  real_background_dirs:
+  use_unsplash_backgrounds: true
+  unsplash_background_prob: 0.75
+  unsplash_background_dirs:
     - artifacts/local/background_domains/unsplash/forest
     - artifacts/local/background_domains/unsplash/industrial
 ```
+
+`unsplash_background_prob` riguarda solo i domini Unsplash.
+Gli hard negatives sono separati e configurati in `hard_negative_mining`.
+
+Per automatizzare la raccolta hard negatives dentro la pipeline puoi usare anche:
+
+```yaml
+hard_negative_mining:
+  enabled: true
+  sources:
+    - path/to/drone_footage.mp4
+  weights: latest
+  conf: 0.15
+  stride: 5
+  max_samples: 500
+  output_collection: auto
+```
+
+Quando e' attivo, `run_experiment.py` esegue prima la raccolta e aggiunge automaticamente gli output a `hard_negative_background_dirs`.
 
 ## Come usare detect.py
 

@@ -17,9 +17,24 @@ from settings import ImageTransformSettings
 
 REAL_BG_PATTERNS = ("*.jpg", "*.jpeg", "*.png", "*.webp", "*.bmp")
 
+BACKGROUND_SOURCE_COUNTS = {
+    "hard_negative": 0,
+    "unsplash": 0,
+    "synthetic": 0,
+}
+_BACKGROUND_CALL_DEPTH = 0
 
-def _iter_real_background_paths() -> list[Path]:
-    roots = getattr(ImageTransformSettings, "REAL_BACKGROUND_DIRS", [])
+
+def reset_background_source_counters() -> None:
+    for key in BACKGROUND_SOURCE_COUNTS:
+        BACKGROUND_SOURCE_COUNTS[key] = 0
+
+
+def get_background_source_counters() -> dict[str, int]:
+    return dict(BACKGROUND_SOURCE_COUNTS)
+
+
+def _iter_background_paths(roots: list[str]) -> list[Path]:
     if not isinstance(roots, list) or not roots:
         return []
 
@@ -34,8 +49,8 @@ def _iter_real_background_paths() -> list[Path]:
     return [path for path in paths if path.is_file()]
 
 
-def _sample_real_background(size: int) -> np.ndarray | None:
-    candidates = _iter_real_background_paths()
+def _sample_background_from_dirs(size: int, roots: list[str]) -> np.ndarray | None:
+    candidates = _iter_background_paths(roots)
     if not candidates:
         return None
 
@@ -189,28 +204,55 @@ def generate_random_background(size: int) -> np.ndarray:
     """
     Seleziona casualmente uno dei tipi di sfondo sintetico.
     """
-    use_real = bool(getattr(ImageTransformSettings, "USE_REAL_BACKGROUNDS", False))
-    real_prob = float(getattr(ImageTransformSettings, "REAL_BACKGROUND_PROB", 0.65))
-    if use_real and random.random() < max(0.0, min(1.0, real_prob)):
-        sampled = _sample_real_background(size)
-        if sampled is not None:
-            return sampled
+    global _BACKGROUND_CALL_DEPTH
+    _BACKGROUND_CALL_DEPTH += 1
+    is_top_level = _BACKGROUND_CALL_DEPTH == 1
+    try:
+        use_unsplash = bool(getattr(ImageTransformSettings, "USE_UNSPLASH_BACKGROUNDS", False))
+        unsplash_prob = float(getattr(ImageTransformSettings, "UNSPLASH_BACKGROUND_PROB", 0.65))
+        unsplash_dirs = getattr(ImageTransformSettings, "UNSPLASH_BACKGROUND_DIRS", [])
 
-    generators = [
-        background_flat_color,
-        background_noise,
-        background_gradient,
-        background_blobs,
-        background_lines,
-        background_checker,
-    ]
+        use_hn = bool(getattr(ImageTransformSettings, "USE_HARD_NEGATIVE_BACKGROUNDS", False))
+        hn_prob = float(getattr(ImageTransformSettings, "HARD_NEGATIVE_BACKGROUND_PROB", 0.65))
+        hn_dirs = getattr(ImageTransformSettings, "HARD_NEGATIVE_BACKGROUND_DIRS", [])
 
-    # ogni tanto crea uno sfondo misto più complesso
-    if random.random() < 0.20:
-        return background_mixed(size)
+        if use_hn and random.random() < max(0.0, min(1.0, hn_prob)):
+            sampled = _sample_background_from_dirs(size, hn_dirs)
+            if sampled is not None:
+                if is_top_level:
+                    BACKGROUND_SOURCE_COUNTS["hard_negative"] += 1
+                return sampled
 
-    generator = random.choice(generators)
-    return generator(size)
+        if use_unsplash and random.random() < max(0.0, min(1.0, unsplash_prob)):
+            sampled = _sample_background_from_dirs(size, unsplash_dirs)
+            if sampled is not None:
+                if is_top_level:
+                    BACKGROUND_SOURCE_COUNTS["unsplash"] += 1
+                return sampled
+
+        generators = [
+            background_flat_color,
+            background_noise,
+            background_gradient,
+            background_blobs,
+            background_lines,
+            background_checker,
+        ]
+
+        # ogni tanto crea uno sfondo misto più complesso
+        if random.random() < 0.20:
+            out = background_mixed(size)
+            if is_top_level:
+                BACKGROUND_SOURCE_COUNTS["synthetic"] += 1
+            return out
+
+        generator = random.choice(generators)
+        out = generator(size)
+        if is_top_level:
+            BACKGROUND_SOURCE_COUNTS["synthetic"] += 1
+        return out
+    finally:
+        _BACKGROUND_CALL_DEPTH -= 1
 
 
 # ============================================================

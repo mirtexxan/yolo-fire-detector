@@ -1,9 +1,9 @@
 description:
   title: Debug mini sintetico
   summary: Dataset molto piccolo e veloce per verificare pipeline end-to-end in locale.
-  use_when: Smoke test rapido quando vuoi controllare che generazione, training ed export funzionino.
+  use_when: Smoke test rapido quando vuoi controllare che generazione, training ed
+    export funzionino.
   tradeoff: Qualita modello non rappresentativa; usalo solo per test tecnico.
-
 dataset:
   num_images: 80
   image_size: 384
@@ -11,22 +11,20 @@ dataset:
   train_split: 0.8
   seed: 20260404
   force_regenerate: true
-
 dataset_settings_overrides:
   fire_scale_min: 0.05
-  fire_scale_max: 0.30
-
+  fire_scale_max: 0.3
 image_transform_overrides:
-  use_real_backgrounds: false
-  real_background_prob: 0.0
   perspective_shift: 20
   brightness_beta_min: -20
   brightness_beta_max: 20
   contrast_alpha_min: 0.85
-  contrast_alpha_max: 1.20
-  motion_blur_prob: 0.10
+  contrast_alpha_max: 1.2
+  motion_blur_prob: 0.1
   gaussian_blur_prob: 0.05
   noise_prob: 0.08
   shadow_prob: 0.05
   occlusion_prob: 0.03
   augment_negative_backgrounds: true
+  use_unsplash_backgrounds: false
+  unsplash_background_prob: 0.0

@@ -1,9 +1,11 @@
 description:
   title: Drone alto + sfondi Unsplash (precision-first)
-  summary: Volo 8-25m con target piccolo su sfondi Unsplash; utile per fase di ricerca ampia.
-  use_when: Ricognizione iniziale a quota più alta quando puoi usare solo background Unsplash.
-  tradeoff: Può perdere target molto piccoli/lontani finché non abbassi quota o confidenza.
-
+  summary: Volo 8-25m con target piccolo su sfondi Unsplash; utile per fase di ricerca
+    ampia.
+  use_when: "Ricognizione iniziale a quota pi\xF9 alta quando puoi usare solo background\
+    \ Unsplash."
+  tradeoff: "Pu\xF2 perdere target molto piccoli/lontani finch\xE9 non abbassi quota\
+    \ o confidenza."
 dataset:
   num_images: 3600
   image_size: 640
@@ -11,26 +13,24 @@ dataset:
   train_split: 0.8
   seed: 20260404
   force_regenerate: false
-
 dataset_settings_overrides:
   fire_scale_min: 0.015
   fire_scale_max: 0.14
-
 image_transform_overrides:
-  use_real_backgrounds: true
-  real_background_prob: 1.0
-  real_background_dirs:
-    - artifacts/local/background_domains/unsplash/warehouse
-    - artifacts/local/background_domains/unsplash/industrial
-    - artifacts/local/background_domains/unsplash/forest
   perspective_shift: 28
   brightness_beta_min: -35
   brightness_beta_max: 35
   contrast_alpha_min: 0.78
-  contrast_alpha_max: 1.30
+  contrast_alpha_max: 1.3
   motion_blur_prob: 0.22
-  gaussian_blur_prob: 0.10
-  noise_prob: 0.10
-  shadow_prob: 0.10
+  gaussian_blur_prob: 0.1
+  noise_prob: 0.1
+  shadow_prob: 0.1
   occlusion_prob: 0.04
   augment_negative_backgrounds: true
+  use_unsplash_backgrounds: true
+  unsplash_background_prob: 1.0
+  unsplash_background_dirs:
+  - artifacts/local/background_domains/unsplash/warehouse
+  - artifacts/local/background_domains/unsplash/industrial
+  - artifacts/local/background_domains/unsplash/forest

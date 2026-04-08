@@ -52,11 +52,17 @@ class ImageTransformSettings:
     # Augmentazione sfondi negativi
     AUGMENT_NEGATIVE_BACKGROUNDS = True
 
-    # Sfondi reali opzionali (es. Unsplash) per ridurre il domain gap.
+    # Sfondi Unsplash opzionali (separati dagli hard negatives).
     # Si configurano via image_transform_overrides.
-    USE_REAL_BACKGROUNDS = False
-    REAL_BACKGROUND_DIRS: list[str] = []
-    REAL_BACKGROUND_PROB = 0.65
+    USE_UNSPLASH_BACKGROUNDS = False
+    UNSPLASH_BACKGROUND_DIRS: list[str] = []
+    UNSPLASH_BACKGROUND_PROB = 0.65
+
+    # Sfondi hard negative (raccolti da dati reali) separati da Unsplash.
+    USE_HARD_NEGATIVE_BACKGROUNDS = False
+    HARD_NEGATIVE_BACKGROUND_DIRS: list[str] = []
+    HARD_NEGATIVE_BACKGROUND_PROB = 0.65
+
 
 
 class DatasetGenerationSettings:

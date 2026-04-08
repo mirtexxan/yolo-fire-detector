@@ -58,9 +58,15 @@ FIELD_HELP_TEXTS: dict[str, str] = {
     "Image size (training)": "Risoluzione usata da YOLO durante il training.",
     "Resume policy": "auto = riprende da checkpoint se esiste, never = ricomincia sempre.",
     "Force regenerate dataset": "Se attivo, rigenera il dataset anche se una versione compatibile esiste gia'.",
-    "Usa sfondi reali": "Se attivo, il generatore prova a usare foto reali (es. Unsplash) se hai configurato real_background_dirs nelle opzioni avanzate.",
-    "Probabilita sfondi reali": "Percentuale di campionamento sfondi reali rispetto ai sintetici (0-100%).",
-    "Cartelle domini Unsplash": "Nomi cartelle sotto artifacts/local/background_domains/unsplash da usare per i background reali.",
+    "Usa sfondi Unsplash": "Se attivo, il generatore usa solo cartelle Unsplash configurate per i background pseudo-reali.",
+    "Probabilita sfondi UNSPLASH": "Percentuale di campionamento sfondi Unsplash rispetto ai sintetici (0-100%). Non influenza gli hard negatives.",
+    "Cartelle domini Unsplash": "Nomi cartelle sotto artifacts/local/background_domains/unsplash da usare per i background Unsplash.",
+    "Hard negative mining": "Se attivo, la pipeline raccoglie hard negatives da sorgenti reali prima della generazione dataset.",
+    "HN sources": "Sorgenti per raccolta hard negatives (video, cartelle o immagini singole).",
+    "HN conf": "Soglia confidenza per salvare un falso positivo come hard negative.",
+    "HN stride": "Per video: analizza 1 frame ogni N.",
+    "HN max samples": "Numero massimo di campioni da salvare per sorgente.",
+    "HN output collection": "Nome collezione output in artifacts/.../hard_negatives. Usa 'auto' per derivare dal nome sorgente.",
     "Marker size min ratio": "Dimensione minima del marker nel frame (0.01 = 1% lato immagine). Valori troppo bassi introducono campioni poco informativi.",
     "Marker size max ratio": "Dimensione massima del marker nel frame (0.35 = 35% lato immagine). Alza questo valore se prevedi passaggi molto ravvicinati.",
 
@@ -209,6 +215,11 @@ class ExperimentConfiguratorApp(tk.Tk):
         self.use_real_backgrounds_var = tk.BooleanVar(value=False)
         self.real_background_prob_var = tk.IntVar(value=65)
         self.real_background_domains_var = tk.StringVar(value="")
+        self.hn_enabled_var = tk.BooleanVar(value=False)
+        self.hn_conf_var = tk.StringVar(value="0.15")
+        self.hn_stride_var = tk.StringVar(value="5")
+        self.hn_max_samples_var = tk.StringVar(value="500")
+        self.hn_output_collection_var = tk.StringVar(value="auto")
         self.training_label_var = tk.StringVar()
         self.model_size_var = tk.StringVar()
         self.device_var = tk.StringVar(value="auto")
@@ -261,6 +272,7 @@ class ExperimentConfiguratorApp(tk.Tk):
         self.save_name_var.trace_add("write", self._on_save_name_change)
         self.target_env_var.trace_add("write", self._on_target_env_change)
         self.use_real_backgrounds_var.trace_add("write", self._on_use_real_backgrounds_change)
+        self.hn_enabled_var.trace_add("write", self._on_hn_enabled_change)
         self._apply_config_to_form(self.loaded_config)
         self._on_target_env_change()
 
@@ -311,7 +323,21 @@ class ExperimentConfiguratorApp(tk.Tk):
                 "resume": "",
             },
             "dataset_settings_overrides": {},
-            "image_transform_overrides": {},
+            "image_transform_overrides": {
+                "use_unsplash_backgrounds": False,
+                "unsplash_background_prob": 0.0,
+                "unsplash_background_dirs": [],
+            },
+            "hard_negative_mining": {
+                "enabled": False,
+                "sources": [],
+                "weights": "latest",
+                "conf": 0.15,
+                "stride": 5,
+                "max_samples": 500,
+                "filter_negatives_only": False,
+                "output_collection": "auto",
+            },
             "training_overrides": {},
         }
 
@@ -413,6 +439,28 @@ class ExperimentConfiguratorApp(tk.Tk):
         if not enabled:
             # In synthetic-only mode domains are intentionally left empty.
             self.real_background_domains_var.set("")
+
+    def _on_hn_enabled_change(self, *_args: object) -> None:
+        state = tk.NORMAL if self.hn_enabled_var.get() else tk.DISABLED
+        for widget_name in (
+            "hn_sources_listbox",
+            "hn_conf_entry",
+            "hn_stride_entry",
+            "hn_max_samples_entry",
+            "hn_collection_entry",
+        ):
+            widget = getattr(self, widget_name, None)
+            if widget is not None:
+                widget.configure(state=state)
+        for button_name in (
+            "hn_add_file_button",
+            "hn_add_folder_button",
+            "hn_remove_button",
+            "hn_clear_button",
+        ):
+            button = getattr(self, button_name, None)
+            if button is not None:
+                button.configure(state=state)
 
     def _validate_numeric_input(self, text: str, allow_decimal: bool) -> bool:
         if text == "":
@@ -558,11 +606,11 @@ class ExperimentConfiguratorApp(tk.Tk):
             # Without this, applying a preset might not update the effective generation mode.
             image_transform_data = data.get("image_transform_overrides", {})
             if isinstance(image_transform_data, dict):
-                use_real = bool(image_transform_data.get("use_real_backgrounds", False))
+                use_real = bool(image_transform_data.get("use_unsplash_backgrounds", False))
                 self.use_real_backgrounds_var.set(use_real)
 
-                if "real_background_prob" in image_transform_data:
-                    raw_prob = image_transform_data.get("real_background_prob", 0.65)
+                if "unsplash_background_prob" in image_transform_data:
+                    raw_prob = image_transform_data.get("unsplash_background_prob", 0.65)
                     try:
                         self.real_background_prob_var.set(max(0, min(100, int(round(float(raw_prob) * 100)))))
                     except (TypeError, ValueError):
@@ -570,14 +618,19 @@ class ExperimentConfiguratorApp(tk.Tk):
                 else:
                     self.real_background_prob_var.set(100 if use_real else 0)
 
-                raw_dirs = image_transform_data.get("real_background_dirs", [])
+                raw_dirs = image_transform_data.get("unsplash_background_dirs", [])
                 domain_names: list[str] = []
                 if use_real and isinstance(raw_dirs, list):
                     for item in raw_dirs:
                         text = str(item).strip()
                         if not text:
                             continue
-                        domain_names.append(Path(text).name)
+                        normalized = text.replace("\\", "/")
+                        resolved = Path(text).expanduser()
+                        if resolved.is_absolute() and str(resolved).replace("\\", "/").startswith(UNSPLASH_BACKGROUND_ROOT.as_posix() + "/"):
+                            domain_names.append(resolved.name)
+                        elif "/background_domains/unsplash/" in normalized:
+                            domain_names.append(Path(text).name)
                 self.real_background_domains_var.set(", ".join(domain_names) if domain_names else "")
 
             for section in ("dataset_settings_overrides", "image_transform_overrides"):
@@ -628,6 +681,13 @@ class ExperimentConfiguratorApp(tk.Tk):
         self.use_real_backgrounds_var.set(False)
         self.real_background_prob_var.set(0)
         self.real_background_domains_var.set("")
+        self.hn_enabled_var.set(False)
+        self.hn_conf_var.set("0.15")
+        self.hn_stride_var.set("5")
+        self.hn_max_samples_var.set("500")
+        self.hn_output_collection_var.set("auto")
+        if hasattr(self, "hn_sources_listbox"):
+            self.hn_sources_listbox.delete(0, tk.END)
 
     def reset_training_base_options(self) -> None:
         self.training_preset_var.set("")
@@ -749,13 +809,16 @@ class ExperimentConfiguratorApp(tk.Tk):
 
         self.tab_generale = ttk.Frame(self.main_notebook, padding=8)
         self.tab_presets = ttk.Frame(self.main_notebook, padding=8)
+        self.tab_hard_negative = ttk.Frame(self.main_notebook, padding=8)
         self.tab_advanced = ttk.Frame(self.main_notebook, padding=8)
         self.main_notebook.add(self.tab_generale, text="Generale")
         self.main_notebook.add(self.tab_presets, text="Presets")
+        self.main_notebook.add(self.tab_hard_negative, text="Hard Negatives")
         self.main_notebook.add(self.tab_advanced, text="Avanzate")
 
         self._build_generale_tab(self.tab_generale)
         self._build_presets_tab(self.tab_presets)
+        self._build_hard_negative_tab(self.tab_hard_negative)
         self._build_advanced_tab(self.tab_advanced)
 
     # ------------------------------------------------------ tab Generale
@@ -848,14 +911,14 @@ class ExperimentConfiguratorApp(tk.Tk):
         self._add_help_tooltip(force_cb, self._label_help("Force regenerate dataset"))
 
         real_bg_row = (len(dataset_fields) + 1) // 2 + 1
-        real_bg_cb = ttk.Checkbutton(ds_group, text="Usa sfondi reali (Unsplash)", variable=self.use_real_backgrounds_var)
+        real_bg_cb = ttk.Checkbutton(ds_group, text="Usa sfondi Unsplash", variable=self.use_real_backgrounds_var)
         real_bg_cb.grid(row=real_bg_row, column=0, columnspan=4, sticky=tk.W, pady=(6, 0))
-        self._add_help_tooltip(real_bg_cb, self._label_help("Usa sfondi reali"))
+        self._add_help_tooltip(real_bg_cb, self._label_help("Usa sfondi Unsplash"))
 
         prob_row = real_bg_row + 1
-        prob_lbl = ttk.Label(ds_group, text="Probabilita sfondi reali")
+        prob_lbl = ttk.Label(ds_group, text="Probabilita sfondi UNSPLASH")
         prob_lbl.grid(row=prob_row, column=0, sticky=tk.W, padx=(0, 8), pady=(6, 0))
-        self._add_help_tooltip(prob_lbl, self._label_help("Probabilita sfondi reali"))
+        self._add_help_tooltip(prob_lbl, self._label_help("Probabilita sfondi UNSPLASH"))
         self.prob_scale = ttk.Scale(ds_group, from_=0, to=100, orient=tk.HORIZONTAL, variable=self.real_background_prob_var)
         self.prob_scale.grid(row=prob_row, column=1, sticky="ew", pady=(6, 0))
         self.real_background_prob_label = ttk.Label(ds_group, text="65%")
@@ -869,7 +932,7 @@ class ExperimentConfiguratorApp(tk.Tk):
         self.domains_entry.grid(row=domains_row, column=1, columnspan=3, sticky="ew", pady=(6, 0))
         ttk.Label(
             ds_group,
-            text="Esempi: forest, industrial, warehouse, corridor. Letti da artifacts/local/background_domains/unsplash/<dominio>.",
+            text="Esempi: forest, industrial, warehouse, corridor. Solo domini Unsplash.",
             foreground="#555555",
             wraplength=900,
         ).grid(row=domains_row + 1, column=0, columnspan=4, sticky=tk.W, pady=(2, 0))
@@ -928,6 +991,123 @@ class ExperimentConfiguratorApp(tk.Tk):
         self._update_base_checklist()
 
     # ------------------------------------------------------ tab Presets
+
+    def _build_hard_negative_tab(self, parent: ttk.Frame) -> None:
+        parent.columnconfigure(0, weight=1)
+
+        frame = ttk.LabelFrame(parent, text="Hard Negative Mining", padding=10)
+        frame.pack(fill=tk.BOTH, expand=True)
+        frame.columnconfigure(0, weight=1)
+
+        enable_cb = ttk.Checkbutton(frame, text="Hard negative mining", variable=self.hn_enabled_var)
+        enable_cb.grid(row=0, column=0, sticky=tk.W, pady=(0, 8))
+        self._add_help_tooltip(enable_cb, self._label_help("Hard negative mining"))
+
+        sources_group = ttk.LabelFrame(frame, text="Sorgenti HN (video/cartelle/immagini)", padding=8)
+        sources_group.grid(row=1, column=0, sticky="nsew", pady=(0, 8))
+        sources_group.columnconfigure(0, weight=1)
+        sources_group.rowconfigure(0, weight=1)
+
+        list_row = ttk.Frame(sources_group)
+        list_row.pack(fill=tk.BOTH, expand=True)
+        list_row.columnconfigure(0, weight=1)
+
+        self.hn_sources_listbox = tk.Listbox(list_row, selectmode=tk.EXTENDED, exportselection=False, height=8)
+        self.hn_sources_listbox.grid(row=0, column=0, sticky="nsew")
+        src_scroll = ttk.Scrollbar(list_row, orient=tk.VERTICAL, command=self.hn_sources_listbox.yview)
+        src_scroll.grid(row=0, column=1, sticky="ns")
+        self.hn_sources_listbox.configure(yscrollcommand=src_scroll.set)
+
+        btn_col = ttk.Frame(list_row)
+        btn_col.grid(row=0, column=2, sticky="ns", padx=(8, 0))
+        self.hn_add_file_button = ttk.Button(btn_col, text="Aggiungi file...", command=self.add_hn_source_files)
+        self.hn_add_file_button.pack(fill=tk.X, pady=(0, 4))
+        self.hn_add_folder_button = ttk.Button(btn_col, text="Aggiungi cartella...", command=self.add_hn_source_folder)
+        self.hn_add_folder_button.pack(fill=tk.X, pady=4)
+        self.hn_remove_button = ttk.Button(btn_col, text="Rimuovi selezionati", command=self.remove_selected_hn_sources)
+        self.hn_remove_button.pack(fill=tk.X, pady=4)
+        self.hn_clear_button = ttk.Button(btn_col, text="Pulisci lista", command=self.clear_hn_sources)
+        self.hn_clear_button.pack(fill=tk.X, pady=4)
+
+        ttk.Label(
+            sources_group,
+            text="Queste sorgenti sono usate solo per la raccolta hard negatives, non come cartelle Unsplash.",
+            foreground="#555555",
+            wraplength=900,
+        ).pack(anchor=tk.W, pady=(6, 0))
+
+        params = ttk.LabelFrame(frame, text="Parametri mining", padding=8)
+        params.grid(row=2, column=0, sticky="ew")
+        params.columnconfigure(1, weight=1)
+        params.columnconfigure(3, weight=1)
+
+        hn_conf_lbl = ttk.Label(params, text="HN conf")
+        hn_conf_lbl.grid(row=0, column=0, sticky=tk.W, padx=(0, 8), pady=4)
+        self._add_help_tooltip(hn_conf_lbl, self._label_help("HN conf"))
+        self.hn_conf_entry = ttk.Entry(params, textvariable=self.hn_conf_var)
+        self.hn_conf_entry.grid(row=0, column=1, sticky="ew", pady=4)
+        self._bind_numeric_validation(self.hn_conf_entry, allow_decimal=True)
+
+        hn_stride_lbl = ttk.Label(params, text="HN stride")
+        hn_stride_lbl.grid(row=0, column=2, sticky=tk.W, padx=(10, 8), pady=4)
+        self._add_help_tooltip(hn_stride_lbl, self._label_help("HN stride"))
+        self.hn_stride_entry = ttk.Entry(params, textvariable=self.hn_stride_var)
+        self.hn_stride_entry.grid(row=0, column=3, sticky="ew", pady=4)
+        self._bind_numeric_validation(self.hn_stride_entry, allow_decimal=False)
+
+        hn_max_lbl = ttk.Label(params, text="HN max samples")
+        hn_max_lbl.grid(row=1, column=0, sticky=tk.W, padx=(0, 8), pady=4)
+        self._add_help_tooltip(hn_max_lbl, self._label_help("HN max samples"))
+        self.hn_max_samples_entry = ttk.Entry(params, textvariable=self.hn_max_samples_var)
+        self.hn_max_samples_entry.grid(row=1, column=1, sticky="ew", pady=4)
+        self._bind_numeric_validation(self.hn_max_samples_entry, allow_decimal=False)
+
+        hn_collection_lbl = ttk.Label(params, text="HN output collection")
+        hn_collection_lbl.grid(row=1, column=2, sticky=tk.W, padx=(10, 8), pady=4)
+        self._add_help_tooltip(hn_collection_lbl, self._label_help("HN output collection"))
+        self.hn_collection_entry = ttk.Entry(params, textvariable=self.hn_output_collection_var)
+        self.hn_collection_entry.grid(row=1, column=3, sticky="ew", pady=4)
+
+        self._on_hn_enabled_change()
+
+    def add_hn_source_files(self) -> None:
+        file_paths = filedialog.askopenfilenames(
+            title="Seleziona sorgenti hard negatives (file)",
+            initialdir=str(PROJECT_ROOT),
+            filetypes=[
+                ("Media files", "*.mp4 *.avi *.mov *.mkv *.jpg *.jpeg *.png *.webp *.bmp *.tiff"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not file_paths:
+            return
+        existing_items = self._get_listbox_items(self.hn_sources_listbox)
+        known = set(existing_items)
+        for file_path in file_paths:
+            portable = self._to_project_relative_path(file_path)
+            if portable not in known:
+                self.hn_sources_listbox.insert(tk.END, portable)
+                known.add(portable)
+
+    def add_hn_source_folder(self) -> None:
+        folder = filedialog.askdirectory(
+            title="Seleziona cartella sorgente hard negatives",
+            initialdir=str(PROJECT_ROOT),
+            mustexist=True,
+        )
+        if not folder:
+            return
+        portable = self._to_project_relative_path(folder)
+        existing_items = set(self._get_listbox_items(self.hn_sources_listbox))
+        if portable not in existing_items:
+            self.hn_sources_listbox.insert(tk.END, portable)
+
+    def remove_selected_hn_sources(self) -> None:
+        for index in reversed(self.hn_sources_listbox.curselection()):
+            self.hn_sources_listbox.delete(index)
+
+    def clear_hn_sources(self) -> None:
+        self.hn_sources_listbox.delete(0, tk.END)
 
     def _build_presets_tab(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(1, weight=1)
@@ -1095,9 +1275,12 @@ class ExperimentConfiguratorApp(tk.Tk):
             "VERBOSE",
         }
         image_transform_exclude = {
-            "USE_REAL_BACKGROUNDS",
-            "REAL_BACKGROUND_DIRS",
-            "REAL_BACKGROUND_PROB",
+            "USE_UNSPLASH_BACKGROUNDS",
+            "UNSPLASH_BACKGROUND_DIRS",
+            "UNSPLASH_BACKGROUND_PROB",
+            "USE_HARD_NEGATIVE_BACKGROUNDS",
+            "HARD_NEGATIVE_BACKGROUND_DIRS",
+            "HARD_NEGATIVE_BACKGROUND_PROB",
         }
 
         return {
@@ -1214,27 +1397,61 @@ class ExperimentConfiguratorApp(tk.Tk):
 
         image_transform_overrides = config.get("image_transform_overrides", {})
         if isinstance(image_transform_overrides, dict):
-            use_real = bool(image_transform_overrides.get("use_real_backgrounds", False))
+            legacy_keys = {"use_real_backgrounds", "real_background_prob", "real_background_dirs"}
+            present_legacy = sorted(key for key in legacy_keys if key in image_transform_overrides)
+            if present_legacy:
+                raise ValueError(
+                    "Config non compatibile: chiavi legacy in image_transform_overrides: "
+                    + ", ".join(present_legacy)
+                )
+
+            use_real = bool(image_transform_overrides.get("use_unsplash_backgrounds", False))
             self.use_real_backgrounds_var.set(use_real)
-            raw_prob = image_transform_overrides.get("real_background_prob", 0.65 if use_real else 0.0)
+            raw_prob = image_transform_overrides.get("unsplash_background_prob", 0.65 if use_real else 0.0)
             try:
                 self.real_background_prob_var.set(max(0, min(100, int(round(float(raw_prob) * 100)))))
             except (TypeError, ValueError):
                 self.real_background_prob_var.set(65 if use_real else 0)
 
-            raw_dirs = image_transform_overrides.get("real_background_dirs", [])
+            raw_dirs = image_transform_overrides.get("unsplash_background_dirs", [])
             domain_names: list[str] = []
             if use_real and isinstance(raw_dirs, list):
                 for item in raw_dirs:
                     text = str(item).strip()
                     if not text:
                         continue
-                    domain_names.append(Path(text).name)
+                    normalized = text.replace("\\", "/")
+                    resolved = Path(text).expanduser()
+                    if resolved.is_absolute() and str(resolved).replace("\\", "/").startswith(UNSPLASH_BACKGROUND_ROOT.as_posix() + "/"):
+                        domain_names.append(resolved.name)
+                    elif "/background_domains/unsplash/" in normalized:
+                        domain_names.append(Path(text).name)
             self.real_background_domains_var.set(", ".join(domain_names) if domain_names else "")
         else:
             self.use_real_backgrounds_var.set(False)
             self.real_background_prob_var.set(0)
             self.real_background_domains_var.set("")
+
+        hn_section = config.get("hard_negative_mining", {})
+        if isinstance(hn_section, dict):
+            self.hn_enabled_var.set(bool(hn_section.get("enabled", False)))
+            sources = hn_section.get("sources", [])
+            if isinstance(sources, list):
+                normalized_sources = [str(item).strip() for item in sources if str(item).strip()]
+                self._set_listbox_items(self.hn_sources_listbox, normalized_sources)
+            else:
+                self._set_listbox_items(self.hn_sources_listbox, [])
+            self.hn_conf_var.set(self._to_form_text(hn_section.get("conf", 0.15)))
+            self.hn_stride_var.set(self._to_form_text(hn_section.get("stride", 5)))
+            self.hn_max_samples_var.set(self._to_form_text(hn_section.get("max_samples", 500)))
+            self.hn_output_collection_var.set(str(hn_section.get("output_collection", "auto") or "auto"))
+        else:
+            self.hn_enabled_var.set(False)
+            self._set_listbox_items(self.hn_sources_listbox, [])
+            self.hn_conf_var.set("0.15")
+            self.hn_stride_var.set("5")
+            self.hn_max_samples_var.set("500")
+            self.hn_output_collection_var.set("auto")
 
         self.training_label_var.set(str(training.get("label", "")))
         self.model_size_var.set(self._to_model_size_display(str(training.get("model_size", ""))))
@@ -1250,6 +1467,7 @@ class ExperimentConfiguratorApp(tk.Tk):
         self._sync_guided_from_config(config)
         self._update_project_label_preview()
         self._update_base_checklist()
+        self._on_hn_enabled_change()
 
     def _parse_int(self, value: str, label: str) -> int:
         cleaned = value.strip()
@@ -1323,8 +1541,8 @@ class ExperimentConfiguratorApp(tk.Tk):
 
         image_transform_overrides = self._collect_guided_overrides("image_transform_overrides")
         use_real_backgrounds = bool(self.use_real_backgrounds_var.get())
-        image_transform_overrides["use_real_backgrounds"] = use_real_backgrounds
-        image_transform_overrides["real_background_prob"] = (
+        image_transform_overrides["use_unsplash_backgrounds"] = use_real_backgrounds
+        image_transform_overrides["unsplash_background_prob"] = (
             max(0.0, min(1.0, float(self.real_background_prob_var.get()) / 100.0))
             if use_real_backgrounds
             else 0.0
@@ -1332,10 +1550,29 @@ class ExperimentConfiguratorApp(tk.Tk):
 
         domains_raw = self.real_background_domains_var.get().strip()
         domains = [chunk.strip() for chunk in domains_raw.split(",") if chunk.strip()] if use_real_backgrounds else []
-        image_transform_overrides["real_background_dirs"] = [
+        image_transform_overrides["unsplash_background_dirs"] = [
             (UNSPLASH_BACKGROUND_ROOT / domain).as_posix() for domain in domains
         ]
+
         config["image_transform_overrides"] = image_transform_overrides
+
+        hn_enabled = bool(self.hn_enabled_var.get())
+        hn_sources = self._get_listbox_items(self.hn_sources_listbox) if hn_enabled else []
+        if hn_enabled and not hn_sources:
+            raise ValueError("Hard negative mining attivo ma HN sources e' vuoto")
+        hn_conf = self._parse_float(self.hn_conf_var.get(), "HN conf") if hn_enabled else 0.15
+        hn_stride = self._parse_int(self.hn_stride_var.get(), "HN stride") if hn_enabled else 5
+        hn_max_samples = self._parse_int(self.hn_max_samples_var.get(), "HN max samples") if hn_enabled else 500
+        config["hard_negative_mining"] = {
+            "enabled": hn_enabled,
+            "sources": hn_sources,
+            "weights": "latest",
+            "conf": hn_conf,
+            "stride": hn_stride,
+            "max_samples": hn_max_samples,
+            "filter_negatives_only": False,
+            "output_collection": self.hn_output_collection_var.get().strip() or "auto",
+        }
         config["training_overrides"] = self._collect_guided_overrides("training_overrides")
         config.pop("extends", None)
         return config

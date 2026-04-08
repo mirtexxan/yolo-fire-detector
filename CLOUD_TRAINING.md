@@ -61,6 +61,11 @@ Output atteso:
 dist/yolo-fire-detector-cloud.zip
 ```
 
+Se `configs/generated/latest.cloud.yaml` contiene `image_transform_overrides.use_unsplash_backgrounds: true` e cartelle in `unsplash_background_dirs`, il bundler:
+
+- include automaticamente quelle cartelle nello zip (anche se sono sotto `artifacts/`)
+- termina con errore esplicito se una cartella dichiarata manca, e' vuota o non puo' essere inclusa
+
 Se `configs/generated/latest.cloud.yaml` manca, questo comando termina con errore. In quel caso devi prima rigenerare la configurazione cloud.
 
 Il bundle include automaticamente:

@@ -10,6 +10,8 @@ import numpy as np
 from settings import ImageTransformSettings, DatasetGenerationSettings
 from transformations import (
     generate_random_background,
+    reset_background_source_counters,
+    get_background_source_counters,
     augment_fire,
     resize_fire_with_alpha,
     add_shadow,
@@ -179,6 +181,7 @@ def generate_dataset(
     num_negative = 0
     num_positive = 0
     base_image_usage = {path: 0 for path in resolved_fire_paths}
+    reset_background_source_counters()
 
     for i in range(num_images):
 
@@ -232,4 +235,5 @@ def generate_dataset(
         "seed": seed,
         "fire_image_paths": resolved_fire_paths,
         "base_image_usage": base_image_usage,
+        "background_source_counts": get_background_source_counters(),
     }

@@ -1,9 +1,10 @@
 description:
   title: Drone alto + solo sintetiche
   summary: Volo 8-25m con target piccolo, senza immagini reali.
-  use_when: Test iniziali quando mancano completamente dati reali e vuoi coprire quota alta.
-  tradeoff: È il preset più fragile sul mondo reale; consigliato solo come baseline.
-
+  use_when: Test iniziali quando mancano completamente dati reali e vuoi coprire quota
+    alta.
+  tradeoff: "\xC8 il preset pi\xF9 fragile sul mondo reale; consigliato solo come\
+    \ baseline."
 dataset:
   num_images: 4200
   image_size: 640
@@ -11,22 +12,20 @@ dataset:
   train_split: 0.8
   seed: 20260404
   force_regenerate: false
-
 dataset_settings_overrides:
   fire_scale_min: 0.015
   fire_scale_max: 0.14
-
 image_transform_overrides:
-  use_real_backgrounds: false
-  real_background_prob: 0.0
   perspective_shift: 25
   brightness_beta_min: -30
   brightness_beta_max: 30
-  contrast_alpha_min: 0.80
+  contrast_alpha_min: 0.8
   contrast_alpha_max: 1.25
-  motion_blur_prob: 0.20
-  gaussian_blur_prob: 0.10
+  motion_blur_prob: 0.2
+  gaussian_blur_prob: 0.1
   noise_prob: 0.12
   shadow_prob: 0.08
   occlusion_prob: 0.04
   augment_negative_backgrounds: true
+  use_unsplash_backgrounds: false
+  unsplash_background_prob: 0.0

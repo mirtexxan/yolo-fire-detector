@@ -2,10 +2,10 @@
 
 Runs YOLO inference on a video or image directory and saves every frame
 that triggers a detection above ``--conf`` as a hard-negative image for
-use in the next training round's real_background_dirs.
+use in the next training round's hard_negative_background_dirs.
 
 The saved frames can be added directly to
-``image_transform_overrides.real_background_dirs`` in your YAML config:
+``image_transform_overrides.hard_negative_background_dirs`` in your YAML config:
 the generator will use them as backgrounds both for negative samples and,
 when compositing, for positive samples (fire marker on top of a confusing scene).
 
@@ -26,8 +26,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import sys
 from pathlib import Path
+import re
 
 import cv2
 import yaml
@@ -37,6 +39,40 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tiff"}
+
+
+def _is_image_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in IMAGE_EXTS
+
+
+def _next_sample_index(output_dir: Path) -> int:
+    """Return the next available numeric index for hn_<idx>_*.jpg files."""
+    pattern = re.compile(r"^hn_(\d+)_")
+    max_index = -1
+    for item in output_dir.glob("hn_*_*.jpg"):
+        match = pattern.match(item.name)
+        if match:
+            max_index = max(max_index, int(match.group(1)))
+    return max_index + 1
+
+
+def _image_sha1(frame: "cv2.typing.MatLike") -> str:
+    """Compute a deterministic hash of pixel content for exact-duplicate filtering."""
+    return hashlib.sha1(frame.tobytes()).hexdigest()
+
+
+def _load_existing_hashes(output_dir: Path) -> set[str]:
+    """Index existing hard negatives to support append-mode deduplication."""
+    hashes: set[str] = set()
+    if not output_dir.exists():
+        return hashes
+
+    for path in output_dir.glob("hn_*_*.jpg"):
+        frame = cv2.imread(str(path))
+        if frame is None:
+            continue
+        hashes.add(_image_sha1(frame))
+    return hashes
 
 
 def _resolve_model(model_arg: str) -> Path:
@@ -114,6 +150,7 @@ def collect_hard_negatives(
     max_samples: int,
     stride: int,
     filter_negatives_only: bool = False,
+    deduplicate: bool = True,
 ) -> None:
     from ultralytics import YOLO  # deferred: heavy import
 
@@ -128,20 +165,24 @@ def collect_hard_negatives(
 
     model = YOLO(str(model_path))
     output_dir.mkdir(parents=True, exist_ok=True)
+    start_index = _next_sample_index(output_dir)
+    known_hashes = _load_existing_hashes(output_dir) if deduplicate else set()
 
     saved = 0
     frames_processed = 0
     skipped_positives = 0
+    skipped_duplicates = 0
     total_detections = 0
     max_conf_seen = 0.0
 
-    if source.is_dir():
-        image_paths = _iter_image_paths(source)
+    if source.is_dir() or _is_image_file(source):
+        image_paths = [source] if _is_image_file(source) else _iter_image_paths(source)
         print(f"Immagini trovate: {len(image_paths)}")
 
         labels_dir: Path | None = None
         if filter_negatives_only:
-            labels_dir = _infer_labels_dir(source)
+            labels_probe = source.parent if _is_image_file(source) else source
+            labels_dir = _infer_labels_dir(labels_probe)
             if labels_dir and labels_dir.exists():
                 print(f"Labels dir      : {labels_dir}")
             else:
@@ -162,10 +203,16 @@ def collect_hard_negatives(
             results = model(frame, conf=conf_threshold, verbose=False)
             boxes = results[0].boxes
             if boxes is not None and len(boxes) > 0:
+                if deduplicate:
+                    img_hash = _image_sha1(frame)
+                    if img_hash in known_hashes:
+                        skipped_duplicates += 1
+                        continue
+                    known_hashes.add(img_hash)
                 confs = boxes.conf.cpu().numpy()
                 total_detections += len(confs)
                 max_conf_seen = max(max_conf_seen, float(confs.max()))
-                out_path = output_dir / f"hn_{saved:05d}_{img_path.stem}.jpg"
+                out_path = output_dir / f"hn_{start_index + saved:05d}_{img_path.stem}.jpg"
                 cv2.imwrite(str(out_path), frame)
                 saved += 1
         if skipped_positives:
@@ -193,10 +240,16 @@ def collect_hard_negatives(
             results = model(frame, conf=conf_threshold, verbose=False)
             boxes = results[0].boxes
             if boxes is not None and len(boxes) > 0:
+                if deduplicate:
+                    img_hash = _image_sha1(frame)
+                    if img_hash in known_hashes:
+                        skipped_duplicates += 1
+                        continue
+                    known_hashes.add(img_hash)
                 confs = boxes.conf.cpu().numpy()
                 total_detections += len(confs)
                 max_conf_seen = max(max_conf_seen, float(confs.max()))
-                out_path = output_dir / f"hn_{saved:05d}_frame{frame_idx:06d}.jpg"
+                out_path = output_dir / f"hn_{start_index + saved:05d}_frame{frame_idx:06d}.jpg"
                 cv2.imwrite(str(out_path), frame)
                 saved += 1
                 if saved % 20 == 0:
@@ -209,6 +262,8 @@ def collect_hard_negatives(
     print(f"Frames analizzati      : {frames_processed}")
     if skipped_positives:
         print(f"Saltati (positivi)     : {skipped_positives}")
+    if deduplicate:
+        print(f"Saltati (duplicati)    : {skipped_duplicates}")
     print(f"Hard negative salvati  : {saved}")
     print(f"Detections FP trovate  : {total_detections}")
     if max_conf_seen > 0:
@@ -223,7 +278,7 @@ def collect_hard_negatives(
         print()
         print("Aggiungi a latest.local.yaml per usare nel prossimo round:")
         print("  image_transform_overrides:")
-        print("    real_background_dirs:")
+        print("    hard_negative_background_dirs:")
         print(f"    - {output_dir.as_posix()}")
         print("    # ... aggiungi gli altri domini esistenti sotto")
     else:
@@ -236,14 +291,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Raccoglie hard negative frame da video o cartella immagini.\n"
-            "I frame salvati possono essere aggiunti a real_background_dirs nel YAML config."
+            "I frame salvati possono essere aggiunti a hard_negative_background_dirs nel YAML config."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--source",
         required=True,
-        help="Video (mp4/avi/...) o cartella di immagini da analizzare",
+        help="Video (mp4/avi/...), cartella immagini o singola immagine da analizzare",
     )
     parser.add_argument(
         "--weights",
@@ -284,6 +339,12 @@ def main() -> None:
             "Utile ad es. con la cartella val/ di un dataset reale gia' annotato."
         ),
     )
+    parser.add_argument(
+        "--no-deduplicate",
+        action="store_true",
+        default=False,
+        help="Disattiva deduplica per contenuto (default: deduplica attiva)",
+    )
     args = parser.parse_args()
 
     source = Path(args.source)
@@ -318,6 +379,7 @@ def main() -> None:
         max_samples=args.max_samples,
         stride=args.stride,
         filter_negatives_only=args.filter_negatives_only,
+        deduplicate=not args.no_deduplicate,
     )
 
 

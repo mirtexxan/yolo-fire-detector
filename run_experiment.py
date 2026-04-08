@@ -17,6 +17,7 @@ from config_utils import deep_merge, load_layered_config
 from generator import generate_dataset
 from settings import DatasetGenerationSettings, ImageTransformSettings, TrainingSettings
 from train import create_dataset_yaml, train_model
+from tools.dataset.collect_hard_negatives import collect_hard_negatives, _resolve_model as resolve_hn_model
 from tools.dataset.dataset_report import generate_dataset_report
 from tools.dataset.fetch_unsplash_backgrounds import fetch_backgrounds, load_unsplash_access_key
 
@@ -88,7 +89,24 @@ def default_config() -> dict[str, Any]:
             "resume": "auto",
         },
         "dataset_settings_overrides": {},
-        "image_transform_overrides": {},
+        "image_transform_overrides": {
+            "use_unsplash_backgrounds": False,
+            "unsplash_background_prob": 0.65,
+            "unsplash_background_dirs": [],
+            "use_hard_negative_backgrounds": False,
+            "hard_negative_background_prob": 0.65,
+            "hard_negative_background_dirs": [],
+        },
+        "hard_negative_mining": {
+            "enabled": False,
+            "sources": [],
+            "weights": "latest",
+            "conf": 0.15,
+            "stride": 5,
+            "max_samples": 500,
+            "filter_negatives_only": False,
+            "output_collection": "auto",
+        },
         "training_overrides": {},
     }
 
@@ -444,16 +462,12 @@ def cleanup_completed_run(run_dir: Path) -> None:
 
 
 def _ensure_real_backgrounds() -> None:
-    """Auto-fetch Unsplash backgrounds for any configured dirs that are missing or empty.
-
-    Reads REAL_BACKGROUND_DIRS from ImageTransformSettings (already applied from config).
-    Skips silently if USE_REAL_BACKGROUNDS is False or no dirs are configured.
-    Requires UNSPLASH_ACCESS_KEY env var; warns and continues if missing.
-    """
-    if not bool(getattr(ImageTransformSettings, "USE_REAL_BACKGROUNDS", False)):
+    """Auto-fetch Unsplash backgrounds for any configured Unsplash dirs that are missing or empty."""
+    use_unsplash = bool(getattr(ImageTransformSettings, "USE_UNSPLASH_BACKGROUNDS", False))
+    if not use_unsplash:
         return
 
-    dirs: list[str] = getattr(ImageTransformSettings, "REAL_BACKGROUND_DIRS", []) or []
+    dirs: list[str] = getattr(ImageTransformSettings, "UNSPLASH_BACKGROUND_DIRS", []) or []
     if not dirs:
         return
 
@@ -508,14 +522,143 @@ def _ensure_real_backgrounds() -> None:
         print("   Il dataset verrà generato con soli sfondi sintetici.")
 
 
+def _normalize_unique_paths(paths: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in paths:
+        text = str(item).strip().replace("\\", "/")
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized
+
+
+def _normalize_image_transform_overrides(config: dict[str, Any]) -> None:
+    """Normalize image_transform_overrides to explicit Unsplash/Hard-Negative keys."""
+    image_overrides = config.setdefault("image_transform_overrides", {})
+    if not isinstance(image_overrides, dict):
+        raise ValueError("image_transform_overrides deve essere una mappa")
+
+    legacy_keys = {"use_real_backgrounds", "real_background_prob", "real_background_dirs"}
+    present_legacy = sorted(key for key in legacy_keys if key in image_overrides)
+    if present_legacy:
+        raise KeyError(
+            "Chiavi legacy non supportate in image_transform_overrides: "
+            + ", ".join(present_legacy)
+            + ". Usa use_unsplash_backgrounds/unsplash_background_* e use_hard_negative_backgrounds/hard_negative_background_*"
+        )
+
+    use_unsplash = bool(image_overrides.get("use_unsplash_backgrounds", False))
+    unsplash_prob = image_overrides.get("unsplash_background_prob", 0.65)
+    unsplash_dirs = image_overrides.get("unsplash_background_dirs", [])
+    if not isinstance(unsplash_dirs, list):
+        unsplash_dirs = []
+
+    use_hn = bool(image_overrides.get("use_hard_negative_backgrounds", False))
+    hn_prob = image_overrides.get("hard_negative_background_prob", 0.65)
+    hn_dirs = image_overrides.get("hard_negative_background_dirs", [])
+    if not isinstance(hn_dirs, list):
+        hn_dirs = []
+
+    image_overrides["use_unsplash_backgrounds"] = use_unsplash
+    image_overrides["unsplash_background_prob"] = float(unsplash_prob)
+    image_overrides["unsplash_background_dirs"] = _normalize_unique_paths([str(item) for item in unsplash_dirs])
+    image_overrides["use_hard_negative_backgrounds"] = use_hn
+    image_overrides["hard_negative_background_prob"] = float(hn_prob)
+    image_overrides["hard_negative_background_dirs"] = _normalize_unique_paths([str(item) for item in hn_dirs])
+
+
+def _run_hard_negative_mining(config: dict[str, Any]) -> list[str]:
+    """Optionally collect hard negatives and return output dirs to be reused as backgrounds."""
+    section = config.get("hard_negative_mining", {})
+    if not isinstance(section, dict) or not bool(section.get("enabled", False)):
+        return []
+
+    raw_sources = section.get("sources", [])
+    if not isinstance(raw_sources, list) or not raw_sources:
+        raise ValueError("hard_negative_mining.enabled=true ma hard_negative_mining.sources e' vuoto")
+
+    project_cfg = config.get("project", {})
+    if not isinstance(project_cfg, dict):
+        raise ValueError("Config progetto non valida")
+    persistent_root = resolve_path(str(project_cfg.get("persistent_root", "artifacts/local")), PROJECT_ROOT)
+    assert persistent_root is not None
+
+    weights_arg = str(section.get("weights", "latest") or "latest")
+    conf_threshold = float(section.get("conf", 0.15))
+    stride = int(section.get("stride", 5))
+    max_samples = int(section.get("max_samples", 500))
+    filter_negatives_only = bool(section.get("filter_negatives_only", False))
+    output_collection = str(section.get("output_collection", "auto") or "auto").strip()
+
+    model_path = resolve_hn_model(weights_arg)
+    output_dirs: list[str] = []
+
+    print("🧪 Hard negative mining abilitato")
+    for raw_source in raw_sources:
+        source_text = str(raw_source).strip()
+        if not source_text:
+            continue
+        source_path = resolve_path(source_text, PROJECT_ROOT)
+        if source_path is None or not source_path.exists():
+            raise FileNotFoundError(f"Sorgente hard negative non trovata: {source_text}")
+
+        if output_collection and output_collection.lower() != "auto":
+            collection_name = slugify(output_collection)
+        else:
+            collection_name = slugify(source_path.stem or source_path.name)
+
+        output_dir = (persistent_root / "hard_negatives" / collection_name).resolve()
+        collect_hard_negatives(
+            source=source_path,
+            model_path=model_path,
+            conf_threshold=conf_threshold,
+            output_dir=output_dir,
+            max_samples=max_samples,
+            stride=stride,
+            filter_negatives_only=filter_negatives_only,
+            deduplicate=True,
+        )
+        output_dirs.append(output_dir.as_posix())
+
+    return _normalize_unique_paths(output_dirs)
+
+
+def _inject_hard_negative_background_dirs(config: dict[str, Any], mined_dirs: list[str]) -> None:
+    if not mined_dirs:
+        return
+
+    image_overrides = config.setdefault("image_transform_overrides", {})
+    if not isinstance(image_overrides, dict):
+        raise ValueError("image_transform_overrides deve essere una mappa")
+
+    existing = image_overrides.get("hard_negative_background_dirs", [])
+    existing_dirs = [str(item) for item in existing] if isinstance(existing, list) else []
+    merged_dirs = _normalize_unique_paths(existing_dirs + mined_dirs)
+
+    image_overrides["hard_negative_background_dirs"] = merged_dirs
+    image_overrides["use_hard_negative_backgrounds"] = True
+    try:
+        current_prob = float(image_overrides.get("hard_negative_background_prob", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        current_prob = 0.0
+    if current_prob <= 0.0:
+        image_overrides["hard_negative_background_prob"] = 0.65
+
+
 def run_pipeline(config: dict[str, Any], config_path: Path, *, skip_training: bool = False) -> dict[str, Any]:
     """Execute the dataset-generation pipeline and optionally skip training."""
     project_cfg = config["project"]
     training_cfg = config["training"]
 
     apply_overrides(DatasetGenerationSettings, config.get("dataset_settings_overrides", {}), "dataset_settings_overrides")
-    apply_overrides(ImageTransformSettings, config.get("image_transform_overrides", {}), "image_transform_overrides")
     apply_overrides(TrainingSettings, config.get("training_overrides", {}), "training_overrides")
+
+    mined_dirs = _run_hard_negative_mining(config)
+    _inject_hard_negative_background_dirs(config, mined_dirs)
+    _normalize_image_transform_overrides(config)
+    apply_overrides(ImageTransformSettings, config.get("image_transform_overrides", {}), "image_transform_overrides")
 
     _ensure_real_backgrounds()
 

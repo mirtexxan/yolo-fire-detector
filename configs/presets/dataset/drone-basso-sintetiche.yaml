@@ -1,9 +1,11 @@
 description:
   title: Drone basso + solo sintetiche
-  summary: Volo 2-8m senza usare immagini reali; fallback quando non hai dataset reale disponibile.
-  use_when: Avvio rapido offline o ambienti dove non puoi raccogliere immagini reali subito.
-  tradeoff: Domain gap più alto; aspettati più falsi positivi rispetto ai preset con reali/hard-negatives.
-
+  summary: Volo 2-8m senza usare immagini reali; fallback quando non hai dataset reale
+    disponibile.
+  use_when: Avvio rapido offline o ambienti dove non puoi raccogliere immagini reali
+    subito.
+  tradeoff: "Domain gap pi\xF9 alto; aspettati pi\xF9 falsi positivi rispetto ai preset\
+    \ con reali/hard-negatives."
 dataset:
   num_images: 4200
   image_size: 640
@@ -11,22 +13,20 @@ dataset:
   train_split: 0.8
   seed: 20260404
   force_regenerate: false
-
 dataset_settings_overrides:
   fire_scale_min: 0.06
   fire_scale_max: 0.35
-
 image_transform_overrides:
-  use_real_backgrounds: false
-  real_background_prob: 0.0
   perspective_shift: 25
   brightness_beta_min: -30
   brightness_beta_max: 30
-  contrast_alpha_min: 0.80
+  contrast_alpha_min: 0.8
   contrast_alpha_max: 1.25
-  motion_blur_prob: 0.20
-  gaussian_blur_prob: 0.10
+  motion_blur_prob: 0.2
+  gaussian_blur_prob: 0.1
   noise_prob: 0.12
-  shadow_prob: 0.10
+  shadow_prob: 0.1
   occlusion_prob: 0.04
   augment_negative_backgrounds: true
+  use_unsplash_backgrounds: false
+  unsplash_background_prob: 0.0
