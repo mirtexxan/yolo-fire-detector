@@ -589,7 +589,7 @@ class FireDetector:
                     if frame_count % 30 == 0 and frame.max() < 10:
                         print(f"⚠️ Frame {frame_count}: Ancora nero (max pixel={frame.max()})")
 
-                    frame = cv2.flip(frame, 1)
+                    #frame = cv2.flip(frame, 1)
                     annotated_frame, detections = self.detect_frame(frame)
                     annotated_frame = self.draw_info(annotated_frame, detections, fps)
                     self._imshow_safe("Fire Detection - Webcam", annotated_frame)
